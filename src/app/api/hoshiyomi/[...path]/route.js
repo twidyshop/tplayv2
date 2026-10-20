@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const apiCache = new Map();
-const CACHE_TTL_MS = 15 * 60 * 1000; // Cache 15 Menit
+const CACHE_TTL_MS = 15 * 60 * 1000;
 
 function getCachedData(key) {
   const cached = apiCache.get(key);
@@ -72,7 +72,7 @@ export async function GET(request, { params }) {
 
   const apiKey = process.env.HOSHIYOMI_API_KEY || "";
 
-  // Selalu tambahkan apikey ke query jika belum ada di server request
+  // Lampirkan apikey ke query string backend
   if (apiKey && !searchParams.has("apikey")) {
     searchParams.append("apikey", apiKey);
   }
