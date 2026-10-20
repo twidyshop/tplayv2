@@ -12,29 +12,25 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const episodesCacheRef = useRef({});
   const detailCacheRef = useRef({});
 
-  // iQIYI & WeTV (16:9 Landscape), Platform Drama Pendek (9:16 Portrait)
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
-  // Ekstraksi ID & pembentukan query string aman tanpa parameter 'undefined'
-  const getValidQueryParams = (item) => {
-    const params = new URLSearchParams();
-    const rawId = item.id || item.book_id || item.bookId || item.series_id || item.album_id || item.drama_id;
-
-    if (item.id) params.append("id", item.id);
-    if (item.book_id || item.bookId) params.append("book_id", item.book_id || item.bookId);
-    if (item.album_id) params.append("album_id", item.album_id);
-    if (item.series_id) params.append("series_id", item.series_id);
-
-    if ([...params.keys()].length === 0 && rawId) {
-      params.append("id", rawId);
-    }
-
-    return { rawId, queryString: params.toString() };
+  // Ambil ID utama dari objek drama tanpa nilai undefined
+  const extractPrimaryId = (item) => {
+    if (!item) return "";
+    return (
+      item.book_id ||
+      item.bookId ||
+      item.id ||
+      item.album_id ||
+      item.series_id ||
+      item.drama_id ||
+      ""
+    );
   };
 
-  const { rawId, queryString } = getValidQueryParams(drama);
+  const primaryId = extractPrimaryId(drama);
 
-  // Parsing fleksibel untuk berbagai format JSON dari Hoshiyomi API
+  // Parsing fleksibel dari berbagai jenis payload JSON Hoshiyomi
   const parseListFromResponse = (json) => {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -49,7 +45,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return [];
   };
 
-  // Parsing URL video dari berbagai struktur kunci
+  // Ekstraksi URL streaming video
   const getVideoUrl = (ep) => {
     if (!ep) return "";
     if (typeof ep === "string") return ep;
@@ -61,6 +57,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       ep.stream_url ||
       ep.m3u8 ||
       ep.link ||
+      (ep.qualities && ep.qualities[0]?.url) ||
       ""
     );
   };
@@ -68,8 +65,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   useEffect(() => {
     let isMounted = true;
 
-    async function loadDramaData() {
-      if (!rawId || !queryString) {
+    async function fetchDramaPayload() {
+      if (!primaryId) {
         setLoading(false);
         return;
       }
@@ -77,36 +74,53 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       setLoading(true);
 
       try {
-        // 1. Fetch Detail Metadata
-        let detailData = detailCacheRef.current[rawId];
+        let detailData = detailCacheRef.current[primaryId];
+        let epsList = episodesCacheRef.current[primaryId] || [];
+
+        // 1. Coba Ambil Detail
         if (!detailData) {
-          const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?${queryString}`);
+          let resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${primaryId}`);
+          if (!resDetail.ok) {
+            resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?book_id=${primaryId}`);
+          }
           if (resDetail.ok) {
             const jsonDetail = await resDetail.json();
             detailData = jsonDetail.data || jsonDetail;
-            detailCacheRef.current[rawId] = detailData;
+            detailCacheRef.current[primaryId] = detailData;
           }
         }
+
         if (isMounted && detailData) setDetail(detailData);
 
-        // 2. Fetch Daftar Episode
-        let epsList = episodesCacheRef.current[rawId];
-        if (!epsList || epsList.length === 0) {
-          const resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?${queryString}`);
+        // 2. Coba Ambil Episodes (Metode Bertahap)
+        if (epsList.length === 0) {
+          // Percobaan 1: Menggunakan id
+          let resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${primaryId}`);
+          
+          // Percobaan 2: Menggunakan book_id jika percobaan 1 gagal/400
+          if (!resEps.ok) {
+            resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?book_id=${primaryId}`);
+          }
+
           if (resEps.ok) {
             const jsonEps = await resEps.json();
             epsList = parseListFromResponse(jsonEps);
-            episodesCacheRef.current[rawId] = epsList;
           }
+
+          // Percobaan 3: Jika endpoint /episodes kosong, periksa metadata detail
+          if (epsList.length === 0 && detailData) {
+            epsList = parseListFromResponse(detailData);
+          }
+
+          episodesCacheRef.current[primaryId] = epsList;
         }
 
         if (isMounted) {
-          const finalEpisodes = epsList || [];
-          setEpisodes(finalEpisodes);
-          if (finalEpisodes.length > 0) {
-            setCurrentEpisode(finalEpisodes[0]);
+          setEpisodes(epsList);
+          if (epsList.length > 0) {
+            setCurrentEpisode(epsList[0]);
             onSaveHistory({
-              id: rawId,
+              id: primaryId,
               title: drama.title || drama.name,
               cover: drama.cover || drama.poster,
               platform,
@@ -115,23 +129,23 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           }
         }
       } catch (err) {
-        console.error("Error loading drama player data:", err);
+        console.error("Error fetching drama player data:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
 
-    loadDramaData();
+    fetchDramaPayload();
 
     return () => {
       isMounted = false;
     };
-  }, [rawId, queryString, platform]);
+  }, [primaryId, platform]);
 
   const handleSelectEpisode = (ep, idx) => {
     setCurrentEpisode(ep);
     onSaveHistory({
-      id: rawId,
+      id: primaryId,
       title: drama.title || drama.name,
       cover: drama.cover || drama.poster,
       platform,
@@ -142,8 +156,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const videoSrc = getVideoUrl(currentEpisode);
 
   return (
-    <div className="fixed top-[57px] inset-x-0 bottom-0 z-40 bg-black/95 flex flex-col max-w-lg mx-auto overflow-hidden">
-      {/* Top Navigation Modal */}
+    <div className="fixed top-[56px] left-0 right-0 bottom-0 z-40 bg-black/95 flex flex-col max-w-lg mx-auto overflow-hidden">
+      {/* Sub-Header Modal Player */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex-shrink-0">
         <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">{platform}</span>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-full bg-slate-800">
@@ -151,10 +165,10 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         </button>
       </div>
 
-      {/* Frame Pemutar Video (Landscape 16:9 untuk iQIYI/WeTV, Portrait 9:16 untuk Drama Pendek) */}
+      {/* Frame Pemutar Video */}
       <div
         className={`w-full bg-black flex items-center justify-center relative flex-shrink-0 ${
-          isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[50vh]"
+          isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[48vh]"
         }`}
       >
         {loading ? (
@@ -168,12 +182,12 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         )}
       </div>
 
-      {/* Informasi Drama & Daftar Episode */}
+      {/* Informasi & Daftar Episode */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <div>
           <h2 className="text-white font-bold text-base">{drama.title || drama.name}</h2>
           <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-            {detail?.description || detail?.intro || "Drama favorit tanpa login di TPLAY."}
+            {detail?.description || detail?.intro || "Nonton drama favorit tanpa login di TPLAY."}
           </p>
         </div>
 
