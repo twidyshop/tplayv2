@@ -1,28 +1,34 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Menu } from "lucide-react";
 
 export default function VideoPlayerModal({ drama, platform, onClose, onSaveHistory }) {
   const [detail, setDetail] = useState(null);
   const [episodes, setEpisodes] = useState([]);
   const [currentEpisode, setCurrentEpisode] = useState(null);
   const [streamUrl, setStreamUrl] = useState("");
+  const [subtitleUrl, setSubtitleUrl] = useState("");
   const [loading, setLoading] = useState(true);
-  const [streamLoading, setStreamLoading] = useState(false);
+  
+  // State khusus untuk Portrait Player UI
+  const [isPortraitMenuOpen, setIsPortraitMenuOpen] = useState(false);
 
   const videoRef = useRef(null);
   const hlsInstanceRef = useRef(null);
   const episodesCacheRef = useRef({});
   const detailCacheRef = useRef({});
 
+  // iQIYI & WeTV menggunakan mode Landscape
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
-  // Ekstraksi ID utama drama
+  // Ekstraksi ID yang mencakup semua platform (WeTV butuh cid/vid)
   const getCleanId = (item) => {
     if (!item) return "";
     return String(
       item.id ||
+      item.cid ||
+      item.vid ||
       item.book_id ||
       item.bookId ||
       item.album_id ||
@@ -34,11 +40,11 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const primaryId = getCleanId(drama);
 
-  // Penarik URL video dari objek JSON
+  // Penarik URL Video Anti-Kotak Patah
   const findVideoUrlFromObj = (obj) => {
     if (!obj) return "";
     if (typeof obj === "string") {
-      if (obj.startsWith("http://") || obj.startsWith("https://") || obj.startsWith("//")) {
+      if ((obj.startsWith("http") || obj.startsWith("//")) && !obj.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
         return obj;
       }
       return "";
@@ -47,12 +53,11 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     const directKeys = [
       "video_url", "videoUrl", "play_url", "playUrl", "stream_url", "streamUrl",
       "hls_url", "hlsUrl", "m3u8_url", "m3u8Url", "m3u8", "url", "link",
-      "cdn_url", "cdnUrl", "download_url", "downloadUrl", "media_url",
-      "resource_url", "src", "file"
+      "cdn_url", "cdnUrl", "download_url", "media_url", "src", "file"
     ];
 
     for (const key of directKeys) {
-      if (obj[key] && typeof obj[key] === "string" && (obj[key].startsWith("http") || obj[key].startsWith("//"))) {
+      if (obj[key] && typeof obj[key] === "string" && obj[key].startsWith("http")) {
         return obj[key];
       }
     }
@@ -70,23 +75,39 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     if (typeof obj === "object") {
       for (const k in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, k)) {
-          if (
-            k.toLowerCase().includes("cover") ||
-            k.toLowerCase().includes("poster") ||
-            k.toLowerCase().includes("image") ||
-            k.toLowerCase().includes("thumb")
-          ) {
-            continue;
-          }
+          if (k.toLowerCase().match(/cover|poster|image|thumb|pic/)) continue;
           const res = findVideoUrlFromObj(obj[k]);
           if (res) return res;
         }
       }
     }
-
     return "";
   };
 
+  // Penarik URL Subtitle
+  const findSubtitleUrl = (obj) => {
+    if (!obj) return "";
+    const subKeys = ["subtitle", "subtitles", "captions", "cc", "srt"];
+    
+    for (const key of subKeys) {
+      const val = obj[key];
+      if (!val) continue;
+      if (typeof val === "string" && val.startsWith("http")) return val;
+      
+      if (Array.isArray(val) && val.length > 0) {
+        // Cari subtitle bahasa Indonesia jika ada
+        const idSub = val.find(s => s.lang && (s.lang.toLowerCase().includes('id') || s.lang.toLowerCase().includes('ind')));
+        if (idSub) return idSub.url || idSub.src || idSub.file || "";
+        return val[0].url || val[0].src || val[0].file || "";
+      }
+      if (typeof val === "object") {
+        return val.url || val.src || val.file || "";
+      }
+    }
+    return "";
+  };
+
+  // Parser Data API (Menangani Format WeTV)
   const parseEpisodesArray = (json) => {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -95,9 +116,13 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     if (Array.isArray(json.chapter_list)) return json.chapter_list;
     if (Array.isArray(json.items)) return json.items;
     if (Array.isArray(json.list)) return json.list;
-    if (json.data && Array.isArray(json.data.episodes)) return json.data.episodes;
-    if (json.data && Array.isArray(json.data.chapter_list)) return json.data.chapter_list;
-    if (json.data && Array.isArray(json.data.list)) return json.data.list;
+    if (json.data) {
+      if (Array.isArray(json.data.episodes)) return json.data.episodes;
+      if (Array.isArray(json.data.chapter_list)) return json.data.chapter_list;
+      if (Array.isArray(json.data.list)) return json.data.list;
+      if (Array.isArray(json.data.episode_list)) return json.data.episode_list;
+      if (Array.isArray(json.data.items)) return json.data.items;
+    }
     return [];
   };
 
@@ -110,7 +135,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         setLoading(false);
         return;
       }
-
       setLoading(true);
 
       try {
@@ -148,7 +172,19 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         if (isMounted) {
           setEpisodes(epsList);
           if (epsList.length > 0) {
-            setCurrentEpisode(epsList[0]);
+            const firstEp = epsList[0];
+            setCurrentEpisode(firstEp);
+            
+            setStreamUrl(findVideoUrlFromObj(firstEp));
+            setSubtitleUrl(findSubtitleUrl(firstEp) || findSubtitleUrl(detailData));
+
+            onSaveHistory({
+              id: primaryId,
+              title: drama.title || drama.name,
+              cover: drama.cover || drama.poster,
+              platform,
+              episode: 1
+            });
           }
         }
       } catch (err) {
@@ -159,68 +195,10 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     }
 
     loadDramaData();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [primaryId, platform]);
 
-  // 2. Fetch Stream Video untuk Episode yang Dipilih
-  useEffect(() => {
-    if (!currentEpisode) return;
-
-    let isMounted = true;
-    const directUrl = findVideoUrlFromObj(currentEpisode);
-
-    if (directUrl) {
-      setStreamUrl(directUrl);
-      return;
-    }
-
-    // Jika link stream tidak ada di objek episode, lakukan request stream per-episode
-    async function fetchStreamOnDemand() {
-      setStreamLoading(true);
-      setStreamUrl("");
-
-      const epId =
-        currentEpisode.id ||
-        currentEpisode.episode_id ||
-        currentEpisode.chapter_id ||
-        currentEpisode.book_id ||
-        "";
-
-      try {
-        const queryParams = new URLSearchParams();
-        if (primaryId) queryParams.append("id", primaryId);
-        if (epId) queryParams.append("episode_id", epId);
-
-        let res = await fetch(`/api/hoshiyomi/${platform}/stream?${queryParams.toString()}`);
-        if (!res.ok) {
-          res = await fetch(`/api/hoshiyomi/${platform}/play?${queryParams.toString()}`);
-        }
-
-        if (res.ok) {
-          const jsonStream = await res.json();
-          const fetchedUrl = findVideoUrlFromObj(jsonStream.data || jsonStream);
-          if (isMounted && fetchedUrl) {
-            setStreamUrl(fetchedUrl);
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching stream on demand:", err);
-      } finally {
-        if (isMounted) setStreamLoading(false);
-      }
-    }
-
-    fetchStreamOnDemand();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentEpisode, primaryId, platform]);
-
-  // 3. HLS & Video Player Binding (Perbaikan Gambar Kotak Patah)
+  // 2. HLS.js Binding untuk Android / Brave tanpa Strict CORS
   useEffect(() => {
     if (!streamUrl || !videoRef.current) return;
 
@@ -261,6 +239,12 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const handleSelectEpisode = (ep, idx) => {
     setCurrentEpisode(ep);
+    setStreamUrl(findVideoUrlFromObj(ep));
+    setSubtitleUrl(findSubtitleUrl(ep));
+    
+    // Tutup menu overlay jika di mode portrait setelah pilih episode
+    if (!isLandscape) setIsPortraitMenuOpen(false);
+
     onSaveHistory({
       id: primaryId,
       title: drama.title || drama.name,
@@ -270,83 +254,146 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     });
   };
 
+  // Komponen Grid Episode yang Reusable
+  const renderEpisodeGrid = () => (
+    <div className="grid grid-cols-5 gap-2">
+      {episodes.map((ep, idx) => {
+        const isActive = currentEpisode === ep;
+        return (
+          <button
+            key={idx}
+            onClick={() => handleSelectEpisode(ep, idx)}
+            className={`py-2 text-xs font-medium rounded-lg border transition ${
+              isActive
+                ? "bg-purple-600 border-purple-400 text-white font-bold"
+                : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+            }`}
+          >
+            {idx + 1}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="fixed top-[56px] left-0 right-0 bottom-0 z-40 bg-black/95 flex flex-col max-w-lg mx-auto overflow-hidden">
       {/* Sub-Header Modal */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex-shrink-0 z-50">
         <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">{platform}</span>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-full bg-slate-800">
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Frame Pemutar Video */}
-      <div
-        className={`w-full bg-black flex items-center justify-center relative flex-shrink-0 ${
-          isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[46vh]"
-        }`}
-      >
-        {loading || streamLoading ? (
-          <div className="flex flex-col items-center gap-2">
-            <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
-            <span className="text-xs text-slate-400">Memuat episode...</span>
-          </div>
-        ) : streamUrl ? (
-          <video
-            ref={videoRef}
-            controls
-            autoPlay
-            playsInline
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-contain"
-          />
-        ) : (
-          <div className="text-center p-4 text-xs text-slate-400">
-            {episodes.length > 0
-              ? "URL video episode tidak ditemukan di provider."
-              : "Daftar episode sedang memuat..."}
-          </div>
-        )}
-      </div>
-
-      {/* Detail & Pilihan Episode */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <div>
-          <h2 className="text-white font-bold text-base">{drama.title || drama.name}</h2>
-          <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-            {detail?.description || detail?.intro || "Streaming drama favorit tanpa login di TPLAY."}
-          </p>
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 bg-black">
+          <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+          <span className="text-xs text-slate-400">Memuat data provider...</span>
         </div>
+      ) : isLandscape ? (
+        // ==========================================
+        // LAYOUT LANDSCAPE (iQIYI & WeTV)
+        // ==========================================
+        <>
+          <div className="w-full aspect-video bg-black flex items-center justify-center relative flex-shrink-0">
+            {streamUrl ? (
+              <video
+                ref={videoRef}
+                controls
+                autoPlay
+                playsInline
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-contain"
+              >
+                {subtitleUrl && <track kind="captions" src={subtitleUrl} srcLang="id" label="Indonesia" default />}
+              </video>
+            ) : (
+              <div className="text-center p-4 text-xs text-slate-400">URL video tidak ditemukan.</div>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black">
+            <div>
+              <h2 className="text-white font-bold text-base">{drama.title || drama.name}</h2>
+              <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                {detail?.description || detail?.intro || "Streaming drama favorit tanpa login di TPLAY."}
+              </p>
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                Pilih Episode ({episodes.length})
+              </h3>
+              {episodes.length === 0 ? (
+                <p className="text-xs text-slate-500 italic">Daftar episode tidak tersedia.</p>
+              ) : (
+                renderEpisodeGrid()
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        // ==========================================
+        // LAYOUT PORTRAIT (Full Height / Short Drama)
+        // ==========================================
+        <div className="flex-1 relative w-full h-full bg-black flex flex-col">
+          <div className="absolute inset-0 flex items-center justify-center">
+            {streamUrl ? (
+              <video
+                ref={videoRef}
+                controls
+                autoPlay
+                playsInline
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-contain"
+              >
+                {subtitleUrl && <track kind="captions" src={subtitleUrl} srcLang="id" label="Indonesia" default />}
+              </video>
+            ) : (
+              <div className="text-center p-4 text-xs text-slate-400">URL video tidak ditemukan.</div>
+            )}
+          </div>
 
-        <div>
-          <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-            Pilih Episode ({episodes.length})
-          </h3>
+          {/* Overlay Info Judul di Bawah Video */}
+          {!isPortraitMenuOpen && (
+            <div className="absolute bottom-6 left-4 right-16 z-30 pointer-events-none drop-shadow-md">
+              <h2 className="text-white font-bold text-sm line-clamp-1">{drama.title || drama.name}</h2>
+              <p className="text-xs text-slate-300 font-semibold drop-shadow-lg">
+                Episode {currentEpisode?.episode || currentEpisode?.index || 1}
+              </p>
+            </div>
+          )}
 
-          {episodes.length === 0 && !loading ? (
-            <p className="text-xs text-slate-500 italic">Daftar episode tidak tersedia.</p>
-          ) : (
-            <div className="grid grid-cols-5 gap-2">
-              {episodes.map((ep, idx) => {
-                const isActive = currentEpisode === ep;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => handleSelectEpisode(ep, idx)}
-                    className={`py-2 text-xs font-medium rounded-lg border transition ${
-                      isActive
-                        ? "bg-purple-600 border-purple-400 text-white font-bold"
-                        : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
-                    }`}
-                  >
-                    {idx + 1}
-                  </button>
-                );
-              })}
+          {/* Tombol Hamburger Overlay */}
+          <button
+            onClick={() => setIsPortraitMenuOpen(!isPortraitMenuOpen)}
+            className="absolute right-4 bottom-6 z-50 bg-purple-600/90 p-3 rounded-full text-white backdrop-blur shadow-xl border border-purple-400/50 active:scale-95 transition"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          {/* Drawer Menu Episode */}
+          {isPortraitMenuOpen && (
+            <div className="absolute inset-x-0 bottom-0 top-[35%] bg-slate-900/95 backdrop-blur-xl z-40 rounded-t-3xl border-t border-slate-700 flex flex-col overflow-hidden shadow-[0_-10px_40px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom-full duration-300">
+              <div className="flex justify-between items-center p-4 border-b border-slate-800">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-200">Pilih Episode ({episodes.length})</h3>
+                  <p className="text-[10px] text-slate-400">{drama.title || drama.name}</p>
+                </div>
+                <button onClick={() => setIsPortraitMenuOpen(false)} className="p-2 bg-slate-800 rounded-full text-slate-300 hover:text-white">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 pb-24">
+                {episodes.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic text-center mt-10">Daftar episode tidak tersedia.</p>
+                ) : (
+                  renderEpisodeGrid()
+                )}
+              </div>
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
