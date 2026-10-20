@@ -15,13 +15,18 @@ export default function Home() {
   const [dramas, setDramas] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Modals state
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedDramaForPlayer, setSelectedDramaForPlayer] = useState(null);
   const [watchHistory, setWatchHistory] = useState([]);
 
-  // Load history dari localStorage
+  // Fungsi untuk reset kembali ke Beranda saat logo TPLAY diklik
+  const handleResetHome = () => {
+    setSelectedPlatform(PLATFORMS[0]);
+    setActiveEndpoint(PLATFORMS[0].endpoints[0].id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   useEffect(() => {
     const saved = localStorage.getItem("tplay_history");
     if (saved) {
@@ -55,17 +60,19 @@ export default function Home() {
       try {
         const res = await fetch(`/api/hoshiyomi/${selectedPlatform.id}/${activeEndpoint}`);
         const data = await res.json();
-        const list = data.data || data.items || data.results || [];
+        
+        let list = [];
+        if (Array.isArray(data)) list = data;
+        else if (Array.isArray(data.data)) list = data.data;
+        else if (Array.isArray(data.items)) list = data.items;
+        else if (Array.isArray(data.results)) list = data.results;
 
         setDramas(list);
-        if (list.length > 0) {
-          setHeroDrama(list[0]);
-        } else {
-          setHeroDrama(null);
-        }
+        if (list.length > 0) setHeroDrama(list[0]);
+        else setHeroDrama(null);
       } catch (err) {
         console.error("Failed fetching contents:", err);
-      } fontFinally: {
+      } finally {
         setLoading(false);
       }
     }
@@ -75,11 +82,14 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#0b0c10] text-slate-100 max-w-lg mx-auto relative pb-20 shadow-2xl">
-      {/* 1. HEADER BERSIH TANPA TAGLINE */}
-      <header className="sticky top-0 z-40 bg-[#0b0c10]/90 backdrop-blur-md px-4 py-3 flex items-center justify-between border-b border-slate-900/50">
-        <h1 className="text-2xl font-black tracking-wider bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
+      {/* 1. STICKY HEADER TERKUNCI DI ATAS */}
+      <header className="sticky top-0 z-50 bg-[#0b0c10]/95 backdrop-blur-md px-4 py-3 flex items-center justify-between border-b border-slate-900 shadow-md">
+        <button
+          onClick={handleResetHome}
+          className="text-2xl font-black tracking-wider bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent active:scale-95 transition"
+        >
           TPLAY
-        </h1>
+        </button>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsSearchOpen(true)}
@@ -138,7 +148,7 @@ export default function Home() {
         )}
       </section>
 
-      {/* 3. PLATFORM SELECTOR (1 BARIS HORIZONTAL KESAMPING) */}
+      {/* 3. PLATFORM SELECTOR (1 BARIS HORIZONTAL) */}
       <section className="px-4 py-2">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Platform</span>
@@ -170,7 +180,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 4. SUB-MENU DINAMIS SESUAI ENDPOINTS PLATFORM */}
+      {/* 4. SUB-MENU ENDPOINTS */}
       <section className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-slate-900 pb-2">
           {selectedPlatform.endpoints.map((ep) => {
@@ -192,7 +202,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 5. GRID CONTENT DRAMA */}
+      {/* 5. GRID DRAMA */}
       <section className="px-4 py-3">
         {loading ? (
           <div className="grid grid-cols-3 gap-3">
