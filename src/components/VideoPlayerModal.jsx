@@ -10,12 +10,14 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const [streamUrl, setStreamUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const videoRef = useRef(null);
+  const hlsInstanceRef = useRef(null);
   const episodesCacheRef = useRef({});
   const detailCacheRef = useRef({});
 
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
-  // Ekstraksi ID yang bersih
+  // Ambil ID utama drama
   const getCleanId = (item) => {
     if (!item) return "";
     return String(
@@ -31,72 +33,55 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const primaryId = getCleanId(drama);
 
-  // Deep search untuk menemukan URL video dalam objek episode (Mendukung semua platform)
-  const findAnyVideoUrl = (obj) => {
+  // Penarik URL video rekursif dari segala nama kunci JSON Hoshiyomi API
+  const findVideoUrlFromObj = (obj) => {
     if (!obj) return "";
     if (typeof obj === "string") {
-      if (obj.startsWith("http://") || obj.startsWith("https://")) {
-        const lower = obj.toLowerCase();
-        if (
-          !lower.endsWith(".jpg") &&
-          !lower.endsWith(".jpeg") &&
-          !lower.endsWith(".png") &&
-          !lower.endsWith(".webp") &&
-          !lower.endsWith(".gif")
-        ) {
-          return obj;
-        }
+      if (obj.startsWith("http://") || obj.startsWith("https://") || obj.startsWith("//")) {
+        return obj;
       }
       return "";
     }
 
-    // Cek nama kunci utama secara langsung
-    const primaryKeys = [
+    // 1. Cek properti langsung
+    const directKeys = [
       "video_url", "videoUrl", "play_url", "playUrl", "stream_url", "streamUrl",
       "hls_url", "hlsUrl", "m3u8_url", "m3u8Url", "m3u8", "url", "link",
-      "cdn_url", "cdnUrl", "download_url", "downloadUrl", "video", "media_url",
-      "resource_url", "video_path", "video_link", "file"
+      "cdn_url", "cdnUrl", "download_url", "downloadUrl", "media_url",
+      "resource_url", "src", "file"
     ];
 
-    for (const key of primaryKeys) {
-      if (obj[key]) {
-        const found = findAnyVideoUrl(obj[key]);
-        if (found) return found;
+    for (const key of directKeys) {
+      if (obj[key] && typeof obj[key] === "string" && (obj[key].startsWith("http") || obj[key].startsWith("//"))) {
+        return obj[key];
       }
     }
 
-    // Cek properti bertingkat (array qualities, streams, dll.)
-    const arrayKeys = ["qualities", "streams", "video_list", "urls", "episodes", "list", "data"];
+    // 2. Cek array bertingkat (qualities, streams, video_list, urls)
+    const arrayKeys = ["qualities", "streams", "video_list", "urls", "video_qualities"];
     for (const key of arrayKeys) {
-      if (Array.isArray(obj[key])) {
+      if (Array.isArray(obj[key]) && obj[key].length > 0) {
         for (const item of obj[key]) {
-          const found = findAnyVideoUrl(item);
+          const found = findVideoUrlFromObj(item);
           if (found) return found;
         }
       }
     }
 
-    // Pencarian rekursif untuk struktur JSON unik
+    // 3. Rekursi untuk objek bersarang (nested object)
     if (typeof obj === "object") {
-      for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      for (const k in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, k)) {
           if (
-            key.includes("cover") ||
-            key.includes("poster") ||
-            key.includes("image") ||
-            key.includes("avatar") ||
-            key.includes("thumb")
+            k.toLowerCase().includes("cover") ||
+            k.toLowerCase().includes("poster") ||
+            k.toLowerCase().includes("image") ||
+            k.toLowerCase().includes("thumb")
           ) {
             continue;
           }
-          const val = obj[key];
-          if (typeof val === "string") {
-            const found = findAnyVideoUrl(val);
-            if (found) return found;
-          } else if (typeof val === "object" && val !== null) {
-            const found = findAnyVideoUrl(val);
-            if (found) return found;
-          }
+          const res = findVideoUrlFromObj(obj[k]);
+          if (res) return res;
         }
       }
     }
@@ -104,7 +89,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return "";
   };
 
-  // Helper parsing array episode
+  // Helper parser array episode
   const parseEpisodesArray = (json) => {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -119,6 +104,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return [];
   };
 
+  // Load Metadata & List Episode
   useEffect(() => {
     let isMounted = true;
 
@@ -131,7 +117,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       setLoading(true);
 
       try {
-        // Fetch detail metadata
         let detailData = detailCacheRef.current[primaryId];
         if (!detailData) {
           const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${encodeURIComponent(primaryId)}`);
@@ -143,14 +128,10 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         }
         if (isMounted && detailData) setDetail(detailData);
 
-        // Fetch episode via /allepisodes (Sesuai Spesifikasi Hoshiyomi API)
         let epsList = episodesCacheRef.current[primaryId] || [];
 
         if (epsList.length === 0) {
-          // Priority 1: /allepisode (Endpoint resmi Hoshiyomi berisi video)
           let resEps = await fetch(`/api/hoshiyomi/${platform}/allepisode?id=${encodeURIComponent(primaryId)}`);
-          
-          // Priority 2: Fallback ke /episodes
           if (!resEps.ok) {
             resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${encodeURIComponent(primaryId)}`);
           }
@@ -160,7 +141,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
             epsList = parseEpisodesArray(jsonEps);
           }
 
-          // Priority 3: Fallback ke detail metadata
           if (epsList.length === 0 && detailData) {
             epsList = parseEpisodesArray(detailData);
           }
@@ -173,7 +153,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           if (epsList.length > 0) {
             const firstEp = epsList[0];
             setCurrentEpisode(firstEp);
-            const initialUrl = findAnyVideoUrl(firstEp);
+            const initialUrl = findVideoUrlFromObj(firstEp);
             setStreamUrl(initialUrl);
 
             onSaveHistory({
@@ -186,7 +166,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           }
         }
       } catch (err) {
-        console.error("Error loading drama episodes:", err);
+        console.error("Error loading episode list:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -199,9 +179,48 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     };
   }, [primaryId, platform]);
 
+  // Load HLS.js dinamis untuk pemutaran format .m3u8 di Chrome / Brave Android
+  useEffect(() => {
+    if (!streamUrl || !videoRef.current) return;
+
+    const videoEl = videoRef.current;
+
+    if (hlsInstanceRef.current) {
+      hlsInstanceRef.current.destroy();
+      hlsInstanceRef.current = null;
+    }
+
+    const isM3u8 = streamUrl.includes(".m3u8") || streamUrl.includes("m3u8");
+
+    if (isM3u8) {
+      if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+        videoEl.src = streamUrl;
+      } else {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
+        script.onload = () => {
+          if (window.Hls && window.Hls.isSupported()) {
+            const hls = new window.Hls({
+              enableWorker: true,
+              lowLatencyMode: true,
+            });
+            hls.loadSource(streamUrl);
+            hls.attachMedia(videoEl);
+            hlsInstanceRef.current = hls;
+          } else {
+            videoEl.src = streamUrl;
+          }
+        };
+        document.body.appendChild(script);
+      }
+    } else {
+      videoEl.src = streamUrl;
+    }
+  }, [streamUrl]);
+
   const handleSelectEpisode = (ep, idx) => {
     setCurrentEpisode(ep);
-    const url = findAnyVideoUrl(ep);
+    const url = findVideoUrlFromObj(ep);
     setStreamUrl(url);
 
     onSaveHistory({
@@ -215,7 +234,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   return (
     <div className="fixed top-[56px] left-0 right-0 bottom-0 z-40 bg-black/95 flex flex-col max-w-lg mx-auto overflow-hidden">
-      {/* Top Modal Navigation */}
+      {/* Sub-Header Modal */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex-shrink-0">
         <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">{platform}</span>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-full bg-slate-800">
@@ -236,7 +255,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           </div>
         ) : streamUrl ? (
           <video
-            src={streamUrl}
+            ref={videoRef}
             controls
             autoPlay
             playsInline
@@ -246,7 +265,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         ) : (
           <div className="text-center p-4 text-xs text-slate-400">
             {episodes.length > 0
-              ? "URL video episode ini tidak ditemukan di objek episode."
+              ? "URL video episode tidak ditemukan di objek API."
               : "Daftar episode sedang memuat..."}
           </div>
         )}
