@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
-// Simple Server-side In-Memory Cache
 const apiCache = new Map();
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 menit
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 Menit Cache
 
 function getCachedData(key) {
   const cached = apiCache.get(key);
@@ -18,13 +17,11 @@ function setCachedData(key, data) {
   apiCache.set(key, { data, timestamp: Date.now() });
 }
 
-// Utility delay helper
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Fetch dengan Exponential Backoff + Retry-After Handling untuk status 429
 async function fetchWithBackoff(url, apiKey, maxAttempts = 3) {
   let attempt = 0;
-  let backoffMs = 2000; // Mulai dari 2 detik
+  let backoffMs = 2000;
 
   while (attempt < maxAttempts) {
     attempt++;
@@ -36,12 +33,10 @@ async function fetchWithBackoff(url, apiKey, maxAttempts = 3) {
           "User-Agent": "TPLAY-Web-Client/1.0",
           "Content-Type": "application/json",
         },
-        // Caching tambahan di Next.js Data Cache
         next: { revalidate: 900 }
       });
 
       if (response.status === 429) {
-        // Ambil Retry-After dari header Hoshiyomi (dalam detik)
         const retryAfterHeader = response.headers.get("Retry-After");
         let waitTimeMs = backoffMs;
 
@@ -52,11 +47,11 @@ async function fetchWithBackoff(url, apiKey, maxAttempts = 3) {
           }
         }
 
-        console.warn([Hoshiyomi 429 Rate Limit] Waiting ${waitTimeMs}ms before retry attempt ${attempt}/${maxAttempts});
+        console.warn(`[Hoshiyomi 429 Rate Limit] Menunggu ${waitTimeMs}ms sebelum retry ke-${attempt}/${maxAttempts}`);
         
         if (attempt < maxAttempts) {
           await delay(waitTimeMs);
-          backoffMs *= 2; // Exponential backoff (2s -> 4s -> 8s)
+          backoffMs *= 2;
           continue;
         }
       }
@@ -80,7 +75,6 @@ export async function GET(request, { params }) {
   const cacheKey = `${apiPath}?${searchParams.toString()}`;
   const apiKey = process.env.HOSHIYOMI_API_KEY || "";
 
-  // 1. CEK SERVER-SIDE CACHE DAHULU
   const cached = getCachedData(cacheKey);
   if (cached) {
     return NextResponse.json(cached, {
@@ -91,7 +85,6 @@ export async function GET(request, { params }) {
   const targetUrl = `https://api.hoshiyomi.my.id/api/${apiPath}?${searchParams.toString()}`;
 
   try {
-    // 2. FETCH DENGAN RETRY & BACKOFF
     const res = await fetchWithBackoff(targetUrl, apiKey);
 
     if (!res.ok) {
@@ -102,8 +95,6 @@ export async function GET(request, { params }) {
     }
 
     const data = await res.json();
-
-    // 3. SIMPAN KE CACHE JIKA SUKSES
     setCachedData(cacheKey, data);
 
     return NextResponse.json(data, {
