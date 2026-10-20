@@ -20,7 +20,7 @@ export default function Home() {
   const [selectedDramaForPlayer, setSelectedDramaForPlayer] = useState(null);
   const [watchHistory, setWatchHistory] = useState([]);
 
-  // Reset ke Beranda utama & tutup modal player jika sedang terbuka
+  // Reset ke Beranda & Tutup Player
   const handleResetHome = () => {
     setSelectedDramaForPlayer(null);
     setSelectedPlatform(PLATFORMS[0]);
@@ -82,9 +82,9 @@ export default function Home() {
   }, [selectedPlatform, activeEndpoint]);
 
   return (
-    <main className="min-h-screen bg-[#0b0c10] text-slate-100 max-w-lg mx-auto relative pb-20 shadow-2xl">
-      {/* 1. STICKY HEADER TERKUNCI DI ATAS (Z-INDEX 50) */}
-      <header className="sticky top-0 z-50 h-[57px] bg-[#0b0c10] px-4 py-3 flex items-center justify-between border-b border-slate-900 shadow-md">
+    <main className="min-h-screen bg-[#0b0c10] text-slate-100 max-w-lg mx-auto relative pt-[56px] pb-20 shadow-2xl">
+      {/* 1. HEADER UTAMA TERKUNCI PERMANEN (FIXED TOP-0, Z-INDEX 50) */}
+      <header className="fixed top-0 left-0 right-0 z-50 h-[56px] bg-[#0b0c10] border-b border-slate-900 max-w-lg mx-auto px-4 py-3 flex items-center justify-between shadow-md">
         <button
           onClick={handleResetHome}
           className="text-2xl font-black tracking-wider bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent active:scale-95 transition"
@@ -215,7 +215,7 @@ export default function Home() {
           <div className="grid grid-cols-3 gap-3">
             {dramas.map((drama, idx) => (
               <div
-                key={drama.id || drama.book_id || drama.series_id || idx}
+                key={drama.book_id || drama.id || drama.series_id || idx}
                 onClick={() => setSelectedDramaForPlayer(drama)}
                 className="group relative cursor-pointer flex flex-col"
               >
