@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { PLATFORMS } from "@/config/platforms";
+import { PLATFORMS } from "../config/platforms";
 import { Search, Clock, Play, Plus, Loader2 } from "lucide-react";
-import SearchBar from "@/components/SearchBar";
-import WatchHistoryModal from "@/components/WatchHistoryModal";
-import VideoPlayerModal from "@/components/VideoPlayerModal";
+import SearchBar from "../components/SearchBar";
+import WatchHistoryModal from "../components/WatchHistoryModal";
+import VideoPlayerModal from "../components/VideoPlayerModal";
 
 export default function Home() {
   const [selectedPlatform, setSelectedPlatform] = useState(PLATFORMS[0]);
@@ -21,10 +21,16 @@ export default function Home() {
   const [selectedDramaForPlayer, setSelectedDramaForPlayer] = useState(null);
   const [watchHistory, setWatchHistory] = useState([]);
 
-  // Load history from localStorage
+  // Load history dari localStorage
   useEffect(() => {
     const saved = localStorage.getItem("tplay_history");
-    if (saved) setWatchHistory(JSON.parse(saved));
+    if (saved) {
+      try {
+        setWatchHistory(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse history", e);
+      }
+    }
   }, []);
 
   const saveHistory = (item) => {
@@ -38,13 +44,11 @@ export default function Home() {
     localStorage.removeItem("tplay_history");
   };
 
-  // Switch platform
   const handlePlatformChange = (platform) => {
     setSelectedPlatform(platform);
     setActiveEndpoint(platform.endpoints[0].id);
   };
 
-  // Fetch drama items based on current platform & dynamic endpoint
   useEffect(() => {
     async function fetchContent() {
       setLoading(true);
@@ -56,10 +60,12 @@ export default function Home() {
         setDramas(list);
         if (list.length > 0) {
           setHeroDrama(list[0]);
+        } else {
+          setHeroDrama(null);
         }
       } catch (err) {
         console.error("Failed fetching contents:", err);
-      } finally {
+      } fontFinally: {
         setLoading(false);
       }
     }
@@ -139,7 +145,6 @@ export default function Home() {
           <span className="text-[10px] text-slate-500">Geser &gt;</span>
         </div>
 
-        {/* Single Horizontal Row Scroll */}
         <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
           {PLATFORMS.map((platform) => {
             const isSelected = selectedPlatform.id === platform.id;
@@ -165,7 +170,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 4. SUB-MENU DINAMIS SESUAI ENDPOINTS PLATFORM DARI DOKUMENTASI HOSHIYOMI */}
+      {/* 4. SUB-MENU DINAMIS SESUAI ENDPOINTS PLATFORM */}
       <section className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-slate-900 pb-2">
           {selectedPlatform.endpoints.map((ep) => {
