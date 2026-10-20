@@ -20,8 +20,9 @@ export default function Home() {
   const [selectedDramaForPlayer, setSelectedDramaForPlayer] = useState(null);
   const [watchHistory, setWatchHistory] = useState([]);
 
-  // Fungsi untuk reset kembali ke Beranda saat logo TPLAY diklik
+  // Reset ke Beranda utama & tutup modal player jika sedang terbuka
   const handleResetHome = () => {
+    setSelectedDramaForPlayer(null);
     setSelectedPlatform(PLATFORMS[0]);
     setActiveEndpoint(PLATFORMS[0].endpoints[0].id);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -82,8 +83,8 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#0b0c10] text-slate-100 max-w-lg mx-auto relative pb-20 shadow-2xl">
-      {/* 1. STICKY HEADER TERKUNCI DI ATAS */}
-      <header className="sticky top-0 z-50 bg-[#0b0c10]/95 backdrop-blur-md px-4 py-3 flex items-center justify-between border-b border-slate-900 shadow-md">
+      {/* 1. STICKY HEADER TERKUNCI DI ATAS (Z-INDEX 50) */}
+      <header className="sticky top-0 z-50 h-[57px] bg-[#0b0c10] px-4 py-3 flex items-center justify-between border-b border-slate-900 shadow-md">
         <button
           onClick={handleResetHome}
           className="text-2xl font-black tracking-wider bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent active:scale-95 transition"
@@ -148,7 +149,7 @@ export default function Home() {
         )}
       </section>
 
-      {/* 3. PLATFORM SELECTOR (1 BARIS HORIZONTAL) */}
+      {/* 3. PLATFORM SELECTOR */}
       <section className="px-4 py-2">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Platform</span>
@@ -214,7 +215,7 @@ export default function Home() {
           <div className="grid grid-cols-3 gap-3">
             {dramas.map((drama, idx) => (
               <div
-                key={drama.id || drama.book_id || idx}
+                key={drama.id || drama.book_id || drama.series_id || idx}
                 onClick={() => setSelectedDramaForPlayer(drama)}
                 className="group relative cursor-pointer flex flex-col"
               >
