@@ -1,32 +1,23 @@
 import { NextResponse } from "next/server";
 
-const apiCache = new Map();
-const CACHE_TTL_MS = 15 * 60 * 1000;
-
-function getCachedData(key) {
-  const cached = apiCache.get(key);
-  if (!cached) return null;
-  if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
-    apiCache.delete(key);
-    return null;
-  }
-  return cached.data;
-}
-
-function setCachedData(key, data) {
-  apiCache.set(key, { data, timestamp: Date.now() });
-}
-
 export async function GET(request, { params }) {
   const pathArray = params.path || [];
   const { searchParams } = new URL(request.url);
 
-  // PROXY KHUSUS BYPASS CORS SUBTITLE
+  // PROXY KHUSUS SUBTITLE (Bypass CORS & Convert SRT -> VTT)
   if (pathArray[0] === "proxy-sub") {
     const subUrl = searchParams.get("url");
+    if (!subUrl) return new NextResponse("", { status: 400 });
+    
     try {
       const subRes = await fetch(subUrl);
-      const text = await subRes.text();
+      let text = await subRes.text();
+      
+      // Jika formatnya SRT, paksa ubah jadi WEBVTT agar tombol CC HTML5 muncul
+      if (!text.includes("WEBVTT")) {
+        text = "WEBVTT\n\n" + text.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+      }
+      
       return new NextResponse(text, {
         headers: {
           "Content-Type": "text/vtt",
@@ -38,17 +29,14 @@ export async function GET(request, { params }) {
     }
   }
 
+  // PROXY API HOSHIYOMI
   const apiPath = pathArray.join("/");
-  const apiKey = process.env.HOSHIYOMI_API_KEY || "";
+  
+  // Menggunakan API Key milikmu secara langsung sebagai jaminan
+  const apiKey = process.env.HOSHIYOMI_API_KEY || "HOSHIYOMI-PRE-5b2451a5";
 
-  if (apiKey && !searchParams.has("apikey")) {
+  if (!searchParams.has("apikey")) {
     searchParams.append("apikey", apiKey);
-  }
-
-  const cacheKey = `${apiPath}?${searchParams.toString()}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) {
-    return NextResponse.json(cached, { headers: { "X-Cache-Status": "HIT" } });
   }
 
   const targetUrl = `https://api.hoshiyomi.my.id/api/${apiPath}?${searchParams.toString()}`;
@@ -56,26 +44,14 @@ export async function GET(request, { params }) {
   try {
     const res = await fetch(targetUrl, {
       method: "GET",
-      headers: {
-        "X-API-Key": apiKey,
-        "User-Agent": "TPLAY-Web-Client/1.0",
-      }
+      headers: { "X-API-Key": apiKey }
     });
 
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `API Error: Status ${res.status}` },
-        { status: res.status }
-      );
-    }
-
     const data = await res.json();
-    setCachedData(cacheKey, data);
-    return NextResponse.json(data, { headers: { "X-Cache-Status": "MISS" } });
-
+    return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(
-      { error: "Gagal terhubung ke Hoshiyomi API" },
+      { error: "Gagal terhubung ke Hoshiyomi API", details: err.message },
       { status: 500 }
     );
   }
