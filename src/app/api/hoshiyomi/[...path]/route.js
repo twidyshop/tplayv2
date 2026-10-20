@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const apiCache = new Map();
-const CACHE_TTL_MS = 15 * 60 * 1000;
+const CACHE_TTL_MS = 15 * 60 * 1000; // Cache 15 Menit
 
 function getCachedData(key) {
   const cached = apiCache.get(key);
@@ -70,8 +70,14 @@ export async function GET(request, { params }) {
   const apiPath = pathArray.join("/");
   const { searchParams } = new URL(request.url);
 
-  const cacheKey = `${apiPath}?${searchParams.toString()}`;
   const apiKey = process.env.HOSHIYOMI_API_KEY || "";
+
+  // Selalu tambahkan apikey ke query jika belum ada di server request
+  if (apiKey && !searchParams.has("apikey")) {
+    searchParams.append("apikey", apiKey);
+  }
+
+  const cacheKey = `${apiPath}?${searchParams.toString()}`;
 
   const cached = getCachedData(cacheKey);
   if (cached) {
