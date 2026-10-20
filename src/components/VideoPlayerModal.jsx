@@ -14,24 +14,24 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
-  // Ambil ID utama dari objek drama tanpa nilai undefined
-  const extractPrimaryId = (item) => {
+  // Ekstraksi ID secara bersih
+  const getCleanId = (item) => {
     if (!item) return "";
-    return (
+    return String(
+      item.id ||
       item.book_id ||
       item.bookId ||
-      item.id ||
       item.album_id ||
       item.series_id ||
       item.drama_id ||
       ""
-    );
+    ).trim();
   };
 
-  const primaryId = extractPrimaryId(drama);
+  const primaryId = getCleanId(drama);
 
-  // Parsing fleksibel dari berbagai jenis payload JSON Hoshiyomi
-  const parseListFromResponse = (json) => {
+  // Helper parser array episode dari berbagai format payload JSON Hoshiyomi
+  const parseEpisodesArray = (json) => {
     if (!json) return [];
     if (Array.isArray(json)) return json;
     if (Array.isArray(json.data)) return json.data;
@@ -45,10 +45,16 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return [];
   };
 
-  // Ekstraksi URL streaming video
-  const getVideoUrl = (ep) => {
+  // Helper pencari URL video dari objek episode
+  const extractVideoUrl = (ep) => {
     if (!ep) return "";
     if (typeof ep === "string") return ep;
+    
+    if (ep.qualities && Array.isArray(ep.qualities) && ep.qualities.length > 0) {
+      const bestQuality = ep.qualities[ep.qualities.length - 1];
+      if (bestQuality?.url) return bestQuality.url;
+    }
+
     return (
       ep.video_url ||
       ep.play_url ||
@@ -57,7 +63,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       ep.stream_url ||
       ep.m3u8 ||
       ep.link ||
-      (ep.qualities && ep.qualities[0]?.url) ||
+      ep.video ||
       ""
     );
   };
@@ -65,7 +71,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   useEffect(() => {
     let isMounted = true;
 
-    async function fetchDramaPayload() {
+    async function loadAllData() {
       if (!primaryId) {
         setLoading(false);
         return;
@@ -74,42 +80,38 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       setLoading(true);
 
       try {
+        // 1. Fetch Metadata Detail
         let detailData = detailCacheRef.current[primaryId];
-        let epsList = episodesCacheRef.current[primaryId] || [];
-
-        // 1. Coba Ambil Detail
         if (!detailData) {
-          let resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${primaryId}`);
-          if (!resDetail.ok) {
-            resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?book_id=${primaryId}`);
-          }
+          const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${encodeURIComponent(primaryId)}`);
           if (resDetail.ok) {
             const jsonDetail = await resDetail.json();
             detailData = jsonDetail.data || jsonDetail;
             detailCacheRef.current[primaryId] = detailData;
           }
         }
-
         if (isMounted && detailData) setDetail(detailData);
 
-        // 2. Coba Ambil Episodes (Metode Bertahap)
+        // 2. Fetch Episodes dengan Metode Fallback Endpoint
+        let epsList = episodesCacheRef.current[primaryId] || [];
+
         if (epsList.length === 0) {
-          // Percobaan 1: Menggunakan id
-          let resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${primaryId}`);
+          // Tahap A: Coba endpoint /allepisode (spesifikasi Hoshiyomi API)
+          let resEps = await fetch(`/api/hoshiyomi/${platform}/allepisode?id=${encodeURIComponent(primaryId)}`);
           
-          // Percobaan 2: Menggunakan book_id jika percobaan 1 gagal/400
+          // Tahap B: Fallback ke /episodes jika /allepisode 400/404
           if (!resEps.ok) {
-            resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?book_id=${primaryId}`);
+            resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${encodeURIComponent(primaryId)}`);
           }
 
           if (resEps.ok) {
             const jsonEps = await resEps.json();
-            epsList = parseListFromResponse(jsonEps);
+            epsList = parseEpisodesArray(jsonEps);
           }
 
-          // Percobaan 3: Jika endpoint /episodes kosong, periksa metadata detail
+          // Tahap C: Jika masih kosong, ekstrak dari detail metadata
           if (epsList.length === 0 && detailData) {
-            epsList = parseListFromResponse(detailData);
+            epsList = parseEpisodesArray(detailData);
           }
 
           episodesCacheRef.current[primaryId] = epsList;
@@ -129,13 +131,13 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           }
         }
       } catch (err) {
-        console.error("Error fetching drama player data:", err);
+        console.error("Error loading drama stream data:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
 
-    fetchDramaPayload();
+    loadAllData();
 
     return () => {
       isMounted = false;
@@ -153,11 +155,11 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     });
   };
 
-  const videoSrc = getVideoUrl(currentEpisode);
+  const videoSrc = extractVideoUrl(currentEpisode);
 
   return (
     <div className="fixed top-[56px] left-0 right-0 bottom-0 z-40 bg-black/95 flex flex-col max-w-lg mx-auto overflow-hidden">
-      {/* Sub-Header Modal Player */}
+      {/* Sub-Header Modal */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex-shrink-0">
         <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">{platform}</span>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-full bg-slate-800">
@@ -168,26 +170,35 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       {/* Frame Pemutar Video */}
       <div
         className={`w-full bg-black flex items-center justify-center relative flex-shrink-0 ${
-          isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[48vh]"
+          isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[46vh]"
         }`}
       >
         {loading ? (
           <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
         ) : videoSrc ? (
-          <video src={videoSrc} controls autoPlay className="w-full h-full object-contain" />
+          <video
+            src={videoSrc}
+            controls
+            autoPlay
+            playsInline
+            crossOrigin="anonymous"
+            className="w-full h-full object-contain"
+          />
         ) : (
           <div className="text-center p-4 text-xs text-slate-400">
-            Sumber video sedang diproses atau memerlukan akses VIP provider.
+            {episodes.length > 0
+              ? "Sumber video episode ini sedang diproses provider."
+              : "Daftar episode sedang memuat..."}
           </div>
         )}
       </div>
 
-      {/* Informasi & Daftar Episode */}
+      {/* Informasi & Pilihan Episode */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <div>
           <h2 className="text-white font-bold text-base">{drama.title || drama.name}</h2>
           <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-            {detail?.description || detail?.intro || "Nonton drama favorit tanpa login di TPLAY."}
+            {detail?.description || detail?.intro || "Streaming drama favorit tanpa login di TPLAY."}
           </p>
         </div>
 
