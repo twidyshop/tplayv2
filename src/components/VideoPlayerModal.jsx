@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { X, Play, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Loader2 } from "lucide-react";
 
 export default function VideoPlayerModal({ drama, platform, onClose, onSaveHistory }) {
   const [detail, setDetail] = useState(null);
@@ -9,43 +9,70 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const [currentEpisode, setCurrentEpisode] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Client-side Caching Ref (Memory Cache per Komponen)
+  const episodesCacheRef = useRef({});
+  const detailCacheRef = useRef({});
+
   const dramaId = drama.id || drama.book_id || drama.series_id;
 
   useEffect(() => {
-    async function fetchDramaDetail() {
+    let isMounted = true;
+
+    async function loadDramaData() {
       setLoading(true);
+
       try {
-        const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${dramaId}`);
-        const dataDetail = await resDetail.json();
-        const dramaInfo = dataDetail.data || dataDetail;
-        setDetail(dramaInfo);
+        // 1. CACHE METADATA DETAIL
+        let detailData = detailCacheRef.current[dramaId];
+        if (!detailData) {
+          const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${dramaId}`);
+          const jsonDetail = await resDetail.json();
+          detailData = jsonDetail.data || jsonDetail;
+          detailCacheRef.current[dramaId] = detailData;
+        }
 
-        const resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${dramaId}`);
-        const dataEps = await resEps.json();
-        const epsList = dataEps.data || dataEps.episodes || [];
-        setEpisodes(epsList);
+        if (isMounted) setDetail(detailData);
 
-        if (epsList.length > 0) {
-          setCurrentEpisode(epsList[0]);
-          onSaveHistory({
-            id: dramaId,
-            title: drama.title || drama.name,
-            cover: drama.cover || drama.poster,
-            platform,
-            episode: 1
-          });
+        // 2. CACHE METADATA EPISODE (FETCH ONCE ONLY)
+        let epsList = episodesCacheRef.current[dramaId];
+        if (!epsList) {
+          const resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${dramaId}`);
+          const jsonEps = await resEps.json();
+          epsList = jsonEps.data || jsonEps.episodes || [];
+          episodesCacheRef.current[dramaId] = epsList;
+        }
+
+        if (isMounted) {
+          setEpisodes(epsList);
+          if (epsList.length > 0) {
+            setCurrentEpisode(epsList[0]);
+            onSaveHistory({
+              id: dramaId,
+              title: drama.title || drama.name,
+              cover: drama.cover || drama.poster,
+              platform,
+              episode: 1
+            });
+          }
         }
       } catch (err) {
-        console.error("Error fetching detail:", err);
+        console.error("Error loading episode metadata:", err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
-    if (dramaId) fetchDramaDetail();
+    if (dramaId) {
+      loadDramaData();
+    }
+
+    return () => {
+      isMounted = false;
+    };
   }, [dramaId, platform]);
 
   const handleSelectEpisode = (ep, idx) => {
+    // Re-use episode data dari state lokal yang sudah di-cache (Tanpa Re-fetch ke API!)
     setCurrentEpisode(ep);
     onSaveHistory({
       id: dramaId,
@@ -65,6 +92,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         </button>
       </div>
 
+      {/* Video Frame */}
       <div className="w-full aspect-video bg-black flex items-center justify-center relative">
         {loading ? (
           <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
@@ -77,16 +105,17 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           />
         ) : (
           <div className="text-center p-4 text-xs text-slate-400">
-            Sumber pemutaran video tidak ditemukan atau memerlukan izin DRM.
+            Sumber video tidak tersedia atau memerlukan otorisasi player.
           </div>
         )}
       </div>
 
+      {/* Episode Selection List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <div>
           <h2 className="text-white font-bold text-lg">{drama.title || drama.name}</h2>
           <p className="text-xs text-slate-400 mt-1 line-clamp-3">
-            {detail?.description || detail?.intro || "Nonton drama gratis tanpa login di TPLAY."}
+            {detail?.description || detail?.intro || "Drama favorit tanpa login di TPLAY."}
           </p>
         </div>
 
