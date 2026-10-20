@@ -9,6 +9,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const [currentEpisode, setCurrentEpisode] = useState(null);
   const [streamUrl, setStreamUrl] = useState("");
   const [loading, setLoading] = useState(true);
+  const [streamLoading, setStreamLoading] = useState(false);
 
   const videoRef = useRef(null);
   const hlsInstanceRef = useRef(null);
@@ -17,7 +18,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
-  // Ambil ID utama drama
+  // Ekstraksi ID utama drama
   const getCleanId = (item) => {
     if (!item) return "";
     return String(
@@ -33,7 +34,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const primaryId = getCleanId(drama);
 
-  // Penarik URL video rekursif dari segala nama kunci JSON Hoshiyomi API
+  // Penarik URL video dari objek JSON
   const findVideoUrlFromObj = (obj) => {
     if (!obj) return "";
     if (typeof obj === "string") {
@@ -43,7 +44,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       return "";
     }
 
-    // 1. Cek properti langsung
     const directKeys = [
       "video_url", "videoUrl", "play_url", "playUrl", "stream_url", "streamUrl",
       "hls_url", "hlsUrl", "m3u8_url", "m3u8Url", "m3u8", "url", "link",
@@ -57,7 +57,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       }
     }
 
-    // 2. Cek array bertingkat (qualities, streams, video_list, urls)
     const arrayKeys = ["qualities", "streams", "video_list", "urls", "video_qualities"];
     for (const key of arrayKeys) {
       if (Array.isArray(obj[key]) && obj[key].length > 0) {
@@ -68,7 +67,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       }
     }
 
-    // 3. Rekursi untuk objek bersarang (nested object)
     if (typeof obj === "object") {
       for (const k in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, k)) {
@@ -89,7 +87,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return "";
   };
 
-  // Helper parser array episode
   const parseEpisodesArray = (json) => {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -104,7 +101,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return [];
   };
 
-  // Load Metadata & List Episode
+  // 1. Fetch Metadata & Episode List
   useEffect(() => {
     let isMounted = true;
 
@@ -151,18 +148,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         if (isMounted) {
           setEpisodes(epsList);
           if (epsList.length > 0) {
-            const firstEp = epsList[0];
-            setCurrentEpisode(firstEp);
-            const initialUrl = findVideoUrlFromObj(firstEp);
-            setStreamUrl(initialUrl);
-
-            onSaveHistory({
-              id: primaryId,
-              title: drama.title || drama.name,
-              cover: drama.cover || drama.poster,
-              platform,
-              episode: 1
-            });
+            setCurrentEpisode(epsList[0]);
           }
         }
       } catch (err) {
@@ -179,7 +165,62 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     };
   }, [primaryId, platform]);
 
-  // Load HLS.js dinamis untuk pemutaran format .m3u8 di Chrome / Brave Android
+  // 2. Fetch Stream Video untuk Episode yang Dipilih
+  useEffect(() => {
+    if (!currentEpisode) return;
+
+    let isMounted = true;
+    const directUrl = findVideoUrlFromObj(currentEpisode);
+
+    if (directUrl) {
+      setStreamUrl(directUrl);
+      return;
+    }
+
+    // Jika link stream tidak ada di objek episode, lakukan request stream per-episode
+    async function fetchStreamOnDemand() {
+      setStreamLoading(true);
+      setStreamUrl("");
+
+      const epId =
+        currentEpisode.id ||
+        currentEpisode.episode_id ||
+        currentEpisode.chapter_id ||
+        currentEpisode.book_id ||
+        "";
+
+      try {
+        const queryParams = new URLSearchParams();
+        if (primaryId) queryParams.append("id", primaryId);
+        if (epId) queryParams.append("episode_id", epId);
+
+        let res = await fetch(`/api/hoshiyomi/${platform}/stream?${queryParams.toString()}`);
+        if (!res.ok) {
+          res = await fetch(`/api/hoshiyomi/${platform}/play?${queryParams.toString()}`);
+        }
+
+        if (res.ok) {
+          const jsonStream = await res.json();
+          const fetchedUrl = findVideoUrlFromObj(jsonStream.data || jsonStream);
+          if (isMounted && fetchedUrl) {
+            setStreamUrl(fetchedUrl);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching stream on demand:", err);
+      } finally {
+        if (isMounted) setStreamLoading(false);
+      }
+    }
+
+    fetchStreamOnDemand();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentEpisode, primaryId, platform]);
+
+  // 3. HLS & Video Player Binding (Perbaikan Gambar Kotak Patah)
   useEffect(() => {
     if (!streamUrl || !videoRef.current) return;
 
@@ -220,9 +261,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const handleSelectEpisode = (ep, idx) => {
     setCurrentEpisode(ep);
-    const url = findVideoUrlFromObj(ep);
-    setStreamUrl(url);
-
     onSaveHistory({
       id: primaryId,
       title: drama.title || drama.name,
@@ -248,7 +286,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[46vh]"
         }`}
       >
-        {loading ? (
+        {loading || streamLoading ? (
           <div className="flex flex-col items-center gap-2">
             <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
             <span className="text-xs text-slate-400">Memuat episode...</span>
@@ -259,13 +297,13 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
             controls
             autoPlay
             playsInline
-            crossOrigin="anonymous"
+            referrerPolicy="no-referrer"
             className="w-full h-full object-contain"
           />
         ) : (
           <div className="text-center p-4 text-xs text-slate-400">
             {episodes.length > 0
-              ? "URL video episode tidak ditemukan di objek API."
+              ? "URL video episode tidak ditemukan di provider."
               : "Daftar episode sedang memuat..."}
           </div>
         )}
