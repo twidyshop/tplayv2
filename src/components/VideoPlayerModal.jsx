@@ -9,14 +9,13 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const [currentEpisode, setCurrentEpisode] = useState(null);
   const [streamUrl, setStreamUrl] = useState("");
   const [loading, setLoading] = useState(true);
-  const [streamLoading, setStreamLoading] = useState(false);
 
   const episodesCacheRef = useRef({});
   const detailCacheRef = useRef({});
 
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
-  // Ekstraksi ID secara bersih
+  // Ekstraksi ID yang bersih
   const getCleanId = (item) => {
     if (!item) return "";
     return String(
@@ -32,49 +31,80 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const primaryId = getCleanId(drama);
 
-  // Helper pencari URL video dari SELURUH kemungkinan nama kunci Hoshiyomi API
-  const extractVideoUrl = (obj) => {
+  // Deep search untuk menemukan URL video dalam objek episode (Mendukung semua platform)
+  const findAnyVideoUrl = (obj) => {
     if (!obj) return "";
-    if (typeof obj === "string") return obj;
-
-    // Cek array bertingkat (qualities, streams, video_list, urls)
-    if (Array.isArray(obj.qualities) && obj.qualities.length > 0) {
-      const q = obj.qualities[0];
-      return typeof q === "string" ? q : q?.url || q?.video_url || "";
-    }
-    if (Array.isArray(obj.streams) && obj.streams.length > 0) {
-      const s = obj.streams[0];
-      return typeof s === "string" ? s : s?.url || s?.video_url || "";
-    }
-    if (Array.isArray(obj.video_list) && obj.video_list.length > 0) {
-      const v = obj.video_list[0];
-      return typeof v === "string" ? v : v?.url || v?.video_url || "";
-    }
-    if (Array.isArray(obj.urls) && obj.urls.length > 0) {
-      return typeof obj.urls[0] === "string" ? obj.urls[0] : obj.urls[0]?.url || "";
+    if (typeof obj === "string") {
+      if (obj.startsWith("http://") || obj.startsWith("https://")) {
+        const lower = obj.toLowerCase();
+        if (
+          !lower.endsWith(".jpg") &&
+          !lower.endsWith(".jpeg") &&
+          !lower.endsWith(".png") &&
+          !lower.endsWith(".webp") &&
+          !lower.endsWith(".gif")
+        ) {
+          return obj;
+        }
+      }
+      return "";
     }
 
-    // Cek properti langsung
-    return (
-      obj.video_url ||
-      obj.play_url ||
-      obj.url ||
-      obj.hls_url ||
-      obj.stream_url ||
-      obj.m3u8 ||
-      obj.m3u8_url ||
-      obj.link ||
-      obj.video ||
-      obj.cdn_url ||
-      obj.download_url ||
-      obj.media_url ||
-      obj.main_url ||
-      obj.src ||
-      ""
-    );
+    // Cek nama kunci utama secara langsung
+    const primaryKeys = [
+      "video_url", "videoUrl", "play_url", "playUrl", "stream_url", "streamUrl",
+      "hls_url", "hlsUrl", "m3u8_url", "m3u8Url", "m3u8", "url", "link",
+      "cdn_url", "cdnUrl", "download_url", "downloadUrl", "video", "media_url",
+      "resource_url", "video_path", "video_link", "file"
+    ];
+
+    for (const key of primaryKeys) {
+      if (obj[key]) {
+        const found = findAnyVideoUrl(obj[key]);
+        if (found) return found;
+      }
+    }
+
+    // Cek properti bertingkat (array qualities, streams, dll.)
+    const arrayKeys = ["qualities", "streams", "video_list", "urls", "episodes", "list", "data"];
+    for (const key of arrayKeys) {
+      if (Array.isArray(obj[key])) {
+        for (const item of obj[key]) {
+          const found = findAnyVideoUrl(item);
+          if (found) return found;
+        }
+      }
+    }
+
+    // Pencarian rekursif untuk struktur JSON unik
+    if (typeof obj === "object") {
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (
+            key.includes("cover") ||
+            key.includes("poster") ||
+            key.includes("image") ||
+            key.includes("avatar") ||
+            key.includes("thumb")
+          ) {
+            continue;
+          }
+          const val = obj[key];
+          if (typeof val === "string") {
+            const found = findAnyVideoUrl(val);
+            if (found) return found;
+          } else if (typeof val === "object" && val !== null) {
+            const found = findAnyVideoUrl(val);
+            if (found) return found;
+          }
+        }
+      }
+    }
+
+    return "";
   };
 
-  // Helper parser array episode
+  // Helper parsing array episode
   const parseEpisodesArray = (json) => {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -89,7 +119,6 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     return [];
   };
 
-  // 1. Fetch Metadata & Daftar Episode
   useEffect(() => {
     let isMounted = true;
 
@@ -102,7 +131,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       setLoading(true);
 
       try {
-        // Ambil detail
+        // Fetch detail metadata
         let detailData = detailCacheRef.current[primaryId];
         if (!detailData) {
           const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${encodeURIComponent(primaryId)}`);
@@ -114,11 +143,14 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         }
         if (isMounted && detailData) setDetail(detailData);
 
-        // Ambil daftar episode
+        // Fetch episode via /allepisodes (Sesuai Spesifikasi Hoshiyomi API)
         let epsList = episodesCacheRef.current[primaryId] || [];
 
         if (epsList.length === 0) {
+          // Priority 1: /allepisode (Endpoint resmi Hoshiyomi berisi video)
           let resEps = await fetch(`/api/hoshiyomi/${platform}/allepisode?id=${encodeURIComponent(primaryId)}`);
+          
+          // Priority 2: Fallback ke /episodes
           if (!resEps.ok) {
             resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${encodeURIComponent(primaryId)}`);
           }
@@ -128,6 +160,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
             epsList = parseEpisodesArray(jsonEps);
           }
 
+          // Priority 3: Fallback ke detail metadata
           if (epsList.length === 0 && detailData) {
             epsList = parseEpisodesArray(detailData);
           }
@@ -138,11 +171,22 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         if (isMounted) {
           setEpisodes(epsList);
           if (epsList.length > 0) {
-            setCurrentEpisode(epsList[0]);
+            const firstEp = epsList[0];
+            setCurrentEpisode(firstEp);
+            const initialUrl = findAnyVideoUrl(firstEp);
+            setStreamUrl(initialUrl);
+
+            onSaveHistory({
+              id: primaryId,
+              title: drama.title || drama.name,
+              cover: drama.cover || drama.poster,
+              platform,
+              episode: 1
+            });
           }
         }
       } catch (err) {
-        console.error("Error loading episode list:", err);
+        console.error("Error loading drama episodes:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -155,69 +199,11 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     };
   }, [primaryId, platform]);
 
-  // 2. Fetch URL Stream Setiap Kali Episode Berubah
-  useEffect(() => {
-    if (!currentEpisode) return;
-
-    let isMounted = true;
-    const directUrl = extractVideoUrl(currentEpisode);
-
-    if (directUrl) {
-      setStreamUrl(directUrl);
-      return;
-    }
-
-    // Jika di dalam objek episode tidak ada URL stream langsung, panggil endpoint play/stream
-    async function fetchEpisodeStream() {
-      setStreamLoading(true);
-      setStreamUrl("");
-
-      const epId =
-        currentEpisode.episode_id ||
-        currentEpisode.id ||
-        currentEpisode.chapter_id ||
-        currentEpisode.ep_id ||
-        "";
-      const epNum =
-        currentEpisode.episode_number ||
-        currentEpisode.index ||
-        currentEpisode.episode ||
-        1;
-
-      try {
-        let res = await fetch(
-          `/api/hoshiyomi/${platform}/play?id=${encodeURIComponent(primaryId)}&episode_id=${encodeURIComponent(epId)}&episode=${epNum}`
-        );
-
-        if (!res.ok) {
-          res = await fetch(
-            `/api/hoshiyomi/${platform}/stream?id=${encodeURIComponent(primaryId)}&episode_id=${encodeURIComponent(epId)}&episode=${epNum}`
-          );
-        }
-
-        if (res.ok) {
-          const jsonStream = await res.json();
-          const fetchedUrl = extractVideoUrl(jsonStream.data || jsonStream);
-          if (isMounted && fetchedUrl) {
-            setStreamUrl(fetchedUrl);
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching episode stream link:", err);
-      } finally {
-        if (isMounted) setStreamLoading(false);
-      }
-    }
-
-    fetchEpisodeStream();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentEpisode, primaryId, platform]);
-
   const handleSelectEpisode = (ep, idx) => {
     setCurrentEpisode(ep);
+    const url = findAnyVideoUrl(ep);
+    setStreamUrl(url);
+
     onSaveHistory({
       id: primaryId,
       title: drama.title || drama.name,
@@ -243,10 +229,10 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           isLandscape ? "aspect-video" : "aspect-[9/16] max-h-[46vh]"
         }`}
       >
-        {loading || streamLoading ? (
+        {loading ? (
           <div className="flex flex-col items-center gap-2">
             <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
-            <span className="text-xs text-slate-400">Memuat video episode...</span>
+            <span className="text-xs text-slate-400">Memuat episode...</span>
           </div>
         ) : streamUrl ? (
           <video
@@ -260,7 +246,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         ) : (
           <div className="text-center p-4 text-xs text-slate-400">
             {episodes.length > 0
-              ? "Gagal memuat URL video episode ini dari provider."
+              ? "URL video episode ini tidak ditemukan di objek episode."
               : "Daftar episode sedang memuat..."}
           </div>
         )}
