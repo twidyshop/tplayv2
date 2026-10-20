@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const apiCache = new Map();
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 Menit Cache
+const CACHE_TTL_MS = 15 * 60 * 1000;
 
 function getCachedData(key) {
   const cached = apiCache.get(key);
@@ -47,8 +47,6 @@ async function fetchWithBackoff(url, apiKey, maxAttempts = 3) {
           }
         }
 
-        console.warn(`[Hoshiyomi 429 Rate Limit] Menunggu ${waitTimeMs}ms sebelum retry ke-${attempt}/${maxAttempts}`);
-        
         if (attempt < maxAttempts) {
           await delay(waitTimeMs);
           backoffMs *= 2;
@@ -82,7 +80,8 @@ export async function GET(request, { params }) {
     });
   }
 
-  const targetUrl = `https://api.hoshiyomi.my.id/api/${apiPath}?${searchParams.toString()}`;
+  const queryString = searchParams.toString();
+  const targetUrl = `https://api.hoshiyomi.my.id/api/${apiPath}${queryString ? `?${queryString}` : ""}`;
 
   try {
     const res = await fetchWithBackoff(targetUrl, apiKey);
