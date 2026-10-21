@@ -7,10 +7,21 @@ export async function GET(request, { params }) {
   // PROXY KHUSUS SUBTITLE (Bypass CORS & Convert SRT -> VTT)
   if (pathArray[0] === "proxy-sub") {
     const subUrl = searchParams.get("url");
-    if (!subUrl) return new NextResponse("", { status: 400 });
-    
+    if (!subUrl) return new NextResponse("Missing subtitle URL", { status: 400 });
+
+    let parsedSubUrl;
     try {
-      const subRes = await fetch(subUrl);
+      parsedSubUrl = new URL(subUrl);
+      if (parsedSubUrl.protocol !== "https:") {
+        return new NextResponse("Only HTTPS subtitle URLs are allowed", { status: 400 });
+      }
+    } catch {
+      return new NextResponse("Invalid subtitle URL", { status: 400 });
+    }
+
+    try {
+      const subRes = await fetch(parsedSubUrl.toString(), { signal: AbortSignal.timeout(10000) });
+      if (!subRes.ok) return new NextResponse("Subtitle provider error", { status: 502 });
       let text = await subRes.text();
       
       // Jika formatnya SRT, paksa ubah jadi WEBVTT agar tombol CC HTML5 muncul
@@ -32,23 +43,36 @@ export async function GET(request, { params }) {
   // PROXY API HOSHIYOMI
   const apiPath = pathArray.join("/");
   
-  // Menggunakan API Key milikmu secara langsung sebagai jaminan
-  const apiKey = process.env.HOSHIYOMI_API_KEY || "HOSHIYOMI-PRE-5b2451a5";
-
-  if (!searchParams.has("apikey")) {
-    searchParams.append("apikey", apiKey);
+  // Keep the paid API key server-side in Vercel Environment Variables.
+  const apiKey = process.env.HOSHIYOMI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "HOSHIYOMI_API_KEY belum diatur di environment server." },
+      { status: 500 }
+    );
   }
 
+  // Never forward a caller-supplied key to the upstream provider.
+  searchParams.delete("apikey");
+  searchParams.delete("api_key");
   const targetUrl = `https://api.hoshiyomi.my.id/api/${apiPath}?${searchParams.toString()}`;
 
   try {
     const res = await fetch(targetUrl, {
       method: "GET",
-      headers: { "X-API-Key": apiKey }
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(20000),
+      cache: "no-store"
     });
 
-    const data = await res.json();
-    return NextResponse.json(data);
+    const body = await res.text();
+    return new NextResponse(body, {
+      status: res.status,
+      headers: {
+        "Content-Type": res.headers.get("content-type") || "application/json",
+        "Cache-Control": "no-store"
+      }
+    });
   } catch (err) {
     return NextResponse.json(
       { error: "Gagal terhubung ke Hoshiyomi API", details: err.message },
