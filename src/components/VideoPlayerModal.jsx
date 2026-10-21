@@ -211,8 +211,39 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       }
     }
 
-    // The main Hoshiyomi API documents /allepisode as the endpoint that
-    // returns episode video data. Try it before experimental V2 or /play.
+    // Platform-specific playback endpoint: WeTV and iQIYI return stream
+    // metadata from /episode, keyed by the selected episode number. Do not
+    // assume their episode-list object contains a playable URL.
+    if (!bestUrl && (platform === "wetv" || platform === "iqiyi")) {
+      try {
+        const epNum = ep.episode || ep.episode_no || ep.episode_number || ep.ep || ep.index || ep.order || (idx + 1);
+        const playParams = new URLSearchParams({
+          id: String(primaryId),
+          ep: String(epNum),
+          episode: String(epNum),
+          lang: "id",
+        });
+        if (vid) playParams.set("vid", String(vid));
+        const playRes = await fetch(
+          "/api/hoshiyomi/" + encodeURIComponent(platform) + "/episode?" + playParams.toString(),
+          { cache: "no-store" }
+        );
+        if (playRes.ok) {
+          const playData = await playRes.json();
+          bestUrl = extractBestVideo(playData);
+          const foundSub = extractSubtitle(playData);
+          if (foundSub) bestSub = foundSub;
+        } else {
+          console.warn(platform + " episode endpoint returned HTTP " + playRes.status);
+        }
+      } catch (e) {
+        console.error(platform + " episode playback request failed:", e);
+      }
+    }
+
+    // Generic fallback for providers whose /allepisode response includes
+    // per-episode playback URLs. DramaBox alone maps to the main API namespace
+    // dramaboxv2; other platforms must remain on their own main API endpoints.
     if (!bestUrl) {
       try {
         const apiPlatform = platform === "dramabox" ? "dramaboxv2" : platform;
@@ -221,9 +252,9 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         if (allRes.ok) {
           const allData = await allRes.json();
           const allEpisodes = extractEpisodes(allData);
-          const wantedNum = Number(ep.episode || ep.episode_number || ep.index || ep.order || idx + 1);
+          const wantedNum = Number(ep.episode || ep.episode_number || ep.episode_no || ep.ep || ep.index || ep.order || idx + 1);
           const matched = allEpisodes.find((item, i) =>
-            Number(item.episode || item.episode_number || item.episode_no || item.index || item.order || i + 1) === wantedNum
+            Number(item.episode || item.episode_number || item.episode_no || item.ep || item.index || item.order || i + 1) === wantedNum
           ) || allEpisodes[idx];
           if (matched) {
             bestUrl = extractBestVideo(matched);
