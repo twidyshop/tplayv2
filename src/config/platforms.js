@@ -182,8 +182,8 @@ export const PLATFORMS = [
     ]
   },
   {
-    id: "stardust",
-    name: "Stardust",
+    id: "stardusttv",
+    name: "StardustTV",
     iconColor: "from-violet-600 to-fuchsia-600",
     endpoints: [
       { id: "trending", label: "Trending" },
