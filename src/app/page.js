@@ -23,6 +23,9 @@ export default function Home() {
   // Reset ke Beranda & Tutup Player
   const handleResetHome = () => {
     setSelectedDramaForPlayer(null);
+    setDramas([]);
+    setHeroDrama(null);
+    setLoading(true);
     setSelectedPlatform(PLATFORMS[0]);
     setActiveEndpoint(PLATFORMS[0].endpoints[0].id);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -70,7 +73,7 @@ export default function Home() {
       setHeroDrama(null);
       try {
         const res = await fetch(
-          `/api/hoshiyomi/${selectedPlatform.id}/${activeEndpoint}`,
+          `/api/hoshiyomi/${selectedPlatform.id === "dramabox" ? "dramaboxv2" : selectedPlatform.id}/${activeEndpoint}`,
           { signal: controller.signal, cache: "no-store" }
         );
         if (!res.ok) throw new Error(`Hoshiyomi HTTP ${res.status}`);
@@ -278,6 +281,7 @@ export default function Home() {
 
       {selectedDramaForPlayer && (
         <VideoPlayerModal
+          key={selectedPlatform.id + ":" + (selectedDramaForPlayer.id || selectedDramaForPlayer.book_id || selectedDramaForPlayer.vid || selectedDramaForPlayer.title || "selected")}
           drama={selectedDramaForPlayer}
           platform={selectedPlatform.id}
           onClose={() => setSelectedDramaForPlayer(null)}
