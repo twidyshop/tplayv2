@@ -188,7 +188,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     let bestSub = extractSubtitle(ep) || extractSubtitle(fallbackDetail);
 
     // Jika video belum ada di dalam object episode (iQIYI, DramaBox, Freereels), request ke /play
-    if (!bestUrl) {
+    if (!bestUrl && platform === "dramabox") {
       const epId = ep.id || ep.episode_id || ep.chapter_id || primaryId;
       const epNum = ep.episode || ep.index || ep.order || (idx + 1);
       
