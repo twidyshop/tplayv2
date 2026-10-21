@@ -41,6 +41,57 @@ export async function GET(request, { params }) {
     }
   }
 
+  // Stream resource proxy adapted from Tplaysansekai: relay HLS manifests and
+  // rewrite every segment/key/child-playlist URL back through this same proxy.
+  if (pathArray[1] === "proxy") {
+    const target = searchParams.get("url");
+    if (!target) return NextResponse.json({ error: "Parameter url wajib diisi." }, { status: 400 });
+    let mediaUrl;
+    try {
+      mediaUrl = new URL(target);
+      if (!["https:", "http:"].includes(mediaUrl.protocol)) throw new Error("invalid protocol");
+    } catch {
+      return NextResponse.json({ error: "URL media tidak valid." }, { status: 400 });
+    }
+    const sourcePlatform = pathArray[0] || "";
+    const referer = sourcePlatform === "wetv" ? "https://wetv.vip/" :
+      sourcePlatform === "iqiyi" ? "https://www.iq.com/" : "https://www.google.com/";
+    const origin = sourcePlatform === "wetv" ? "https://wetv.vip" :
+      sourcePlatform === "iqiyi" ? "https://www.iq.com" : "";
+    try {
+      const headers = new Headers({ Accept: "*/*", "Accept-Encoding": "identity", Referer: referer, "User-Agent": request.headers.get("user-agent") || "Mozilla/5.0" });
+      if (origin) headers.set("Origin", origin);
+      const range = request.headers.get("range");
+      if (range) headers.set("Range", range);
+      const upstream = await fetch(mediaUrl.toString(), { headers, redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(25000) });
+      const type = upstream.headers.get("content-type") || "";
+      const finalUrl = upstream.url || mediaUrl.toString();
+      const isManifest = type.includes("mpegurl") || /\\.m3u8(?:[?#]|$)/i.test(finalUrl) || /\\.m3u8(?:[?#]|$)/i.test(mediaUrl.toString());
+      const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges,Content-Type", "Cache-Control": "no-store" };
+      if (isManifest) {
+        const body = await upstream.text();
+        const rewritten = upstream.ok ? body.split(/\\r?\\n/).map(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return line;
+          const rewrite = raw => {
+            try { return new URL("/api/hoshiyomi/" + sourcePlatform + "/proxy?url=" + encodeURIComponent(new URL(raw, finalUrl).toString()), request.url).toString(); }
+            catch { return raw; }
+          };
+          if (trimmed.startsWith("#")) return line.replace(/URI="([^"]+)"/g, (_, raw) => 'URI="' + rewrite(raw) + '"');
+          return rewrite(trimmed);
+        }).join("\\n") : body;
+        return new NextResponse(rewritten, { status: upstream.status, headers: { ...cors, "Content-Type": type || "application/vnd.apple.mpegurl" } });
+      }
+      const out = new Headers(cors);
+      for (const key of ["content-type", "content-range", "accept-ranges", "etag", "last-modified"]) {
+        const value = upstream.headers.get(key); if (value) out.set(key, value);
+      }
+      return new NextResponse(upstream.body, { status: upstream.status, headers: out });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Gagal mengambil resource video." }, { status: 502 });
+    }
+  }
+
   // Proxy API Hoshiyomi; /v2 routes to the normalized playback API.
   const useV2 = pathArray[0] === "v2";
   const apiPath = (useV2 ? pathArray.slice(1) : pathArray).join("/");
