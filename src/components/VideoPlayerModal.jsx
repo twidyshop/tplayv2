@@ -29,32 +29,35 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   // 1. Ekstraktor Video: Selalu cari kualitas tertinggi (1080p / array terakhir)
   const extractBestVideo = (obj) => {
     if (!obj) return "";
-    let urls = [];
-
-    const findUrls = (node) => {
-      if (typeof node === 'string' && (node.startsWith('http') || node.startsWith('//')) && !node.match(/\.(jpg|png|webp|vtt|srt|ass)$/i)) {
-        urls.push(node);
+    const urls = [];
+    const streamKeyUrls = [];
+    const visit = (node, keyPath = "") => {
+      if (typeof node === "string") {
+        const value = node.trim();
+        if (/^https?:\/\//i.test(value) && !/\.(jpg|jpeg|png|webp|gif|vtt|srt|ass)(?:[?#]|$)/i.test(value)) {
+          urls.push(value);
+          if (/(?:hls|m3u8|video|stream|play|source|media|file|src|download)/i.test(keyPath)) streamKeyUrls.push(value);
+        } else if (/^#EXTM3U|#EXT-X-/i.test(value)) {
+          streamKeyUrls.unshift(value);
+        }
       } else if (Array.isArray(node)) {
-        node.forEach(findUrls);
-      } else if (typeof node === 'object' && node !== null) {
-        for (const k in node) {
-          if (!k.match(/cover|poster|image|thumb/i)) findUrls(node[k]);
+        node.forEach(item => visit(item, keyPath));
+      } else if (node && typeof node === "object") {
+        for (const [key, value] of Object.entries(node)) {
+          if (!/(cover|poster|image|thumb|avatar|logo)/i.test(key)) visit(value, key);
         }
       }
     };
-    findUrls(obj);
-
-    if (urls.length === 0) return "";
-    const mediaUrls = urls.filter(u => /\.(m3u8|mp4)(?:[?#]|$)|\/api\/stream\?/i.test(u));
-    const m3u8s = mediaUrls.filter(u => /\.m3u8(?:[?#]|$)/i.test(u));
-    if (m3u8s.length > 0) return m3u8s[0];
-    const mp4s = mediaUrls.filter(u => /\.mp4(?:[?#]|$)/i.test(u));
-    if (mp4s.length > 0) return mp4s[0];
-    const relayUrls = mediaUrls.filter(u => /\/api\/stream\?/i.test(u));
-    if (relayUrls.length > 0) return relayUrls[0];
-    return "";
-  };
-
+    visit(obj);
+    const candidates = [...new Set([...streamKeyUrls, ...urls])];
+    const m3u8 = candidates.find(u => /\.m3u8(?:[?#]|$)/i.test(u) || /^#EXTM3U|#EXT-X-/i.test(u));
+    if (m3u8) return m3u8;
+    const mp4 = candidates.find(u => /\.(mp4|m4v|webm)(?:[?#]|$)/i.test(u));
+    if (mp4) return mp4;
+    const relay = candidates.find(u => /\/api\/stream\?/i.test(u));
+    if (relay) return relay;
+    // Signed media URLs may have no file extension; keep stream-related fields.
+    return streamKeyUrls[0] || "";
   // 2. Ekstraktor Subtitle: Paksa cari yang mengandung 'id' atau 'ind'
   const extractSubtitle = (obj) => {
     if (!obj) return "";
@@ -237,7 +240,12 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
     // Ignore late responses from a previous episode selection.
     if (requestSeq !== requestSeqRef.current) return;
-    setStreamUrl(bestUrl);
+    // Use the server proxy for WeTV/iQIYI, following Tplaysansekai's
+    // manifest and segment rewriting approach to avoid browser CORS failures.
+    const playableUrl = bestUrl && /^https?:\/\//i.test(bestUrl) && (platform === "wetv" || platform === "iqiyi")
+      ? `/api/hoshiyomi/${platform}/proxy?url=${encodeURIComponent(bestUrl)}`
+      : bestUrl;
+    setStreamUrl(playableUrl);
     // Proxy Subtitle agar CC Muncul & Tidak kena CORS
     setSubtitleUrl(bestSub ? `/api/hoshiyomi/proxy-sub?url=${encodeURIComponent(bestSub)}` : "");
     setCaptionsEnabled(Boolean(bestSub));
@@ -264,7 +272,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       hlsInstanceRef.current = null;
     }
 
-    if (streamUrl.includes(".m3u8")) {
+    const decodedStreamUrl = (() => { try { return decodeURIComponent(streamUrl); } catch { return streamUrl; } })();
+    if (/\.m3u8(?:[?#]|$)/i.test(decodedStreamUrl) || /^#EXTM3U|#EXT-X-/i.test(decodedStreamUrl)) {
       if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
         videoEl.src = streamUrl;
       } else {
