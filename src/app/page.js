@@ -43,7 +43,7 @@ export default function Home() {
   }, []);
 
   const saveHistory = (item) => {
-    const updated = [item, ...watchHistory.filter((h) => h.id !== item.id)].slice(0, 30);
+    const updated = [item, ...watchHistory.filter((h) => !(h.id === item.id && h.platform === item.platform))].slice(0, 30);
     setWatchHistory(updated);
     localStorage.setItem("tplay_history", JSON.stringify(updated));
   };
