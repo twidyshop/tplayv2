@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, Loader2, Menu } from "lucide-react";
+import { X, Loader2, Menu, Captions } from "lucide-react";
 
 export default function VideoPlayerModal({ drama, platform, onClose, onSaveHistory }) {
   const [detail, setDetail] = useState(null);
@@ -13,6 +13,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const [loading, setLoading] = useState(true);
   const [streamLoading, setStreamLoading] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [captionMenuOpen, setCaptionMenuOpen] = useState(false);
+  const [captionsEnabled, setCaptionsEnabled] = useState(true);
 
   const videoRef = useRef(null);
   const hlsInstanceRef = useRef(null);
@@ -43,11 +45,12 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     findUrls(obj);
 
     if (urls.length === 0) return "";
-    const m3u8s = urls.filter(u => u.includes('.m3u8'));
-    if (m3u8s.length > 0) return m3u8s[m3u8s.length - 1]; // Resolusi tertinggi di array
-    const mp4s = urls.filter(u => u.includes('.mp4'));
-    if (mp4s.length > 0) return mp4s[mp4s.length - 1];
-    return urls[urls.length - 1];
+    const mediaUrls = urls.filter(u => /\\.(m3u8|mp4)(?:[?#]|$)/i.test(u));
+    const m3u8s = mediaUrls.filter(u => /\\.m3u8(?:[?#]|$)/i.test(u));
+    if (m3u8s.length > 0) return m3u8s[0];
+    const mp4s = mediaUrls.filter(u => /\\.mp4(?:[?#]|$)/i.test(u));
+    if (mp4s.length > 0) return mp4s[0];
+    return "";
   };
 
   // 2. Ekstraktor Subtitle: Paksa cari yang mengandung 'id' atau 'ind'
@@ -179,7 +182,29 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           if (foundSub) bestSub = foundSub;
         }
       } catch (e) {
-        console.error("Play endpoint error:", e);
+        console.error("Legacy play endpoint error:", e);
+      }
+    }
+
+    // Normalized V2 episodes include their actual media URL. Try this when
+    // legacy /play does not return a playable MP4/HLS URL.
+    if (!bestUrl) {
+      try {
+        const v2Url = "/api/hoshiyomi/v2/dramas/" + encodeURIComponent(platform) + "/" + encodeURIComponent(primaryId) + "/episodes?lang=id";
+        const v2Res = await fetch(v2Url, { cache: "no-store" });
+        if (v2Res.ok) {
+          const v2Data = await v2Res.json();
+          const v2Episodes = extractEpisodes(v2Data);
+          const wantedNum = Number(ep.episode || ep.index || ep.order || idx + 1);
+          const matched = v2Episodes.find((item, i) => Number(item.episode || item.episode_number || item.index || i + 1) === wantedNum) || v2Episodes[idx];
+          if (matched) {
+            bestUrl = extractBestVideo(matched);
+            const v2Sub = extractSubtitle(matched);
+            if (v2Sub) bestSub = v2Sub;
+          }
+        }
+      } catch (e) {
+        console.error("V2 episode fallback error:", e);
       }
     }
 
