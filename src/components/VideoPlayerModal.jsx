@@ -80,12 +80,30 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   // 3. Ekstraktor List Episode
   const extractEpisodes = (data) => {
-    if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') return data;
-    const keys = ["episodes", "chapter_list", "list", "items", "episode_list", "data"];
-    for (const k of keys) {
-      if (data && Array.isArray(data[k]) && data[k].length > 0) return data[k];
-    }
-    return [];
+    const seen = new Set();
+    const visit = (node, depth = 0) => {
+      if (!node || depth > 5 || typeof node !== "object" || seen.has(node)) return [];
+      seen.add(node);
+      if (Array.isArray(node)) {
+        if (node.length && node.some(item => item && typeof item === "object" &&
+          ["episode", "episode_no", "episode_number", "episode_id", "chapter_id", "video_url", "videoUrl", "url", "play_url", "playUrl", "hls", "stream_url"].some(k => k in item))) return node;
+        for (const item of node) { const found = visit(item, depth + 1); if (found.length) return found; }
+        return [];
+      }
+      const preferred = ["episodes", "allepisode", "chapter_list", "episode_list", "list", "items", "results", "data", "result"];
+      for (const key of preferred) {
+        if (key in node) {
+          const found = visit(node[key], depth + 1);
+          if (found.length) return found;
+        }
+      }
+      for (const value of Object.values(node)) {
+        const found = visit(value, depth + 1);
+        if (found.length) return found;
+      }
+      return [];
+    };
+    return visit(data);
   };
 
   // INIT: Load Metadata & Episodes
@@ -105,7 +123,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       try {
         let epsList = [];
         let detailData = null;
-        const base = `/api/hoshiyomi/${platform}`;
+        const apiPlatform = platform === "dramabox" ? "dramaboxv2" : platform;
+        const base = `/api/hoshiyomi/${apiPlatform}`;
         const params = new URLSearchParams();
         if (primaryId) params.set("id", primaryId);
         if (vid) params.set("vid", vid);
@@ -191,7 +210,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     // returns episode video data. Try it before experimental V2 or /play.
     if (!bestUrl) {
       try {
-        const allUrl = "/api/hoshiyomi/" + encodeURIComponent(platform) + "/allepisode?id=" + encodeURIComponent(primaryId) + "&lang=id";
+        const apiPlatform = platform === "dramabox" ? "dramaboxv2" : platform;
+        const allUrl = "/api/hoshiyomi/" + encodeURIComponent(apiPlatform) + "/allepisode?id=" + encodeURIComponent(primaryId) + "&lang=id";
         const allRes = await fetch(allUrl, { cache: "no-store" });
         if (allRes.ok) {
           const allData = await allRes.json();
@@ -211,26 +231,9 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       }
     }
 
-    // Normalized V2 API requires Pro tier; use only as a final optional fallback.
-    if (!bestUrl) {
-      try {
-        const v2Url = "/api/hoshiyomi/v2/dramas/" + encodeURIComponent(platform) + "/" + encodeURIComponent(primaryId) + "/episodes?lang=id";
-        const v2Res = await fetch(v2Url, { cache: "no-store" });
-        if (v2Res.ok) {
-          const v2Data = await v2Res.json();
-          const v2Episodes = extractEpisodes(v2Data);
-          const wantedNum = Number(ep.episode || ep.index || ep.order || idx + 1);
-          const matched = v2Episodes.find((item, i) => Number(item.episode || item.episode_number || item.index || i + 1) === wantedNum) || v2Episodes[idx];
-          if (matched) {
-            bestUrl = extractBestVideo(matched);
-            const v2Sub = extractSubtitle(matched);
-            if (v2Sub) bestSub = v2Sub;
-          }
-        }
-      } catch (e) {
-        console.error("V2 episode fallback error:", e);
-      }
-    }
+    // The experimental apiv2 endpoint is intentionally not used for WeTV,
+    // iQIYI, Melolo, or other main-API sources. Only DramaBox uses dramaboxv2
+    // through the documented main API namespace above.
 
     // Ignore late responses from a previous episode selection.
     if (requestSeq !== requestSeqRef.current) return;
