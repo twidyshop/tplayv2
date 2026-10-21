@@ -45,7 +45,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     findUrls(obj);
 
     if (urls.length === 0) return "";
-    const mediaUrls = urls.filter(u => /\.(m3u8|mp4)(?:[?#]|$)/i.test(u));
+    const mediaUrls = urls.filter(u => /\.(m3u8|mp4)(?:[?#]|$)|\/api\/stream\?/i.test(u));
     const m3u8s = mediaUrls.filter(u => /\.m3u8(?:[?#]|$)/i.test(u));
     if (m3u8s.length > 0) return m3u8s[0];
     const mp4s = mediaUrls.filter(u => /\.mp4(?:[?#]|$)/i.test(u));
@@ -59,14 +59,13 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     let subs = [];
     
     const findSubs = (node) => {
-      if (typeof node === 'string' && node.match(/\.(vtt|srt|ass)$/i)) {
+      if (typeof node === 'string' && /^https:\/\//i.test(node) && /\.(vtt|srt|ass)(?:[?#]|$)/i.test(node)) {
         subs.push(node);
       } else if (Array.isArray(node)) {
         node.forEach(findSubs);
       } else if (typeof node === 'object' && node !== null) {
         for (const k in node) {
-          // Cari spesifik di objek subtitle
-          if (k.match(/subtitle|caption|sub/i) && typeof node[k] === 'string') subs.push(node[k]);
+          if (k.match(/subtitle|caption|sub/i) && typeof node[k] === 'string' && /^https:\/\//i.test(node[k])) subs.push(node[k]);
           findSubs(node[k]);
         }
       }
@@ -213,6 +212,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     setStreamUrl(bestUrl);
     // Proxy Subtitle agar CC Muncul & Tidak kena CORS
     setSubtitleUrl(bestSub ? `/api/hoshiyomi/proxy-sub?url=${encodeURIComponent(bestSub)}` : "");
+    setCaptionsEnabled(Boolean(bestSub));
     setStreamLoading(false);
   };
 
