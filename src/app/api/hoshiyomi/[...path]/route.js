@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 export async function GET(request, { params }) {
-  const pathArray = params.path || [];
+  const routeParams = await params;
+  const pathArray = routeParams.path || [];
   const { searchParams } = new URL(request.url);
 
   // PROXY KHUSUS SUBTITLE (Bypass CORS & Convert SRT -> VTT)
