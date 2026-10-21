@@ -58,6 +58,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     if (relay) return relay;
     // Signed media URLs may have no file extension; keep stream-related fields.
     return streamKeyUrls[0] || "";
+  };
+
   // 2. Ekstraktor Subtitle: Paksa cari yang mengandung 'id' atau 'ind'
   const extractSubtitle = (obj) => {
     if (!obj) return "";
