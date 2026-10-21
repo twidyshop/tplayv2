@@ -50,6 +50,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     if (m3u8s.length > 0) return m3u8s[0];
     const mp4s = mediaUrls.filter(u => /\.mp4(?:[?#]|$)/i.test(u));
     if (mp4s.length > 0) return mp4s[0];
+    const relayUrls = mediaUrls.filter(u => /\/api\/stream\?/i.test(u));
+    if (relayUrls.length > 0) return relayUrls[0];
     return "";
   };
 
