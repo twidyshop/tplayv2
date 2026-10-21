@@ -216,6 +216,15 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     setStreamLoading(false);
   };
 
+  // Apply the custom CC toggle to the browser text track.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !video.textTracks) return;
+    for (let i = 0; i < video.textTracks.length; i++) {
+      video.textTracks[i].mode = subtitleUrl && captionsEnabled ? "showing" : "disabled";
+    }
+  }, [subtitleUrl, captionsEnabled, streamUrl]);
+
   // HLS Player Binding
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -310,6 +319,15 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
             ) : (
               <div className="text-center p-4 text-xs text-slate-400">URL video diblokir atau tidak ditemukan.</div>
             )}
+            <div className="absolute bottom-3 right-3 z-30">
+              <button onClick={() => setCaptionMenuOpen(!captionMenuOpen)} className="flex items-center gap-1 rounded-lg bg-black/75 border border-white/20 px-3 py-2 text-xs font-semibold text-white">
+                <Captions className="w-4 h-4" /> CC
+              </button>
+              {captionMenuOpen && <div className="absolute bottom-11 right-0 min-w-44 rounded-xl border border-slate-700 bg-slate-950 p-2 text-xs text-white shadow-xl">
+                <button onClick={() => { setCaptionsEnabled(false); setCaptionMenuOpen(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-slate-800">Nonaktif</button>
+                <button disabled={!subtitleUrl} onClick={() => { setCaptionsEnabled(true); setCaptionMenuOpen(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-slate-800 disabled:opacity-40">Indonesia {!subtitleUrl ? "(tidak tersedia)" : ""}</button>
+              </div>}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#0b0c10]">
             <div>
@@ -333,6 +351,16 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">URL video diblokir atau tidak ditemukan.</div>
           )}
+
+          <div className="absolute top-16 right-4 z-30">
+            <button onClick={() => setCaptionMenuOpen(!captionMenuOpen)} className="flex items-center gap-1 rounded-lg bg-black/75 border border-white/20 px-3 py-2 text-xs font-semibold text-white">
+              <Captions className="w-4 h-4" /> CC
+            </button>
+            {captionMenuOpen && <div className="absolute top-11 right-0 min-w-44 rounded-xl border border-slate-700 bg-slate-950 p-2 text-xs text-white shadow-xl">
+              <button onClick={() => { setCaptionsEnabled(false); setCaptionMenuOpen(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-slate-800">Nonaktif</button>
+              <button disabled={!subtitleUrl} onClick={() => { setCaptionsEnabled(true); setCaptionMenuOpen(false); }} className="block w-full rounded px-3 py-2 text-left hover:bg-slate-800 disabled:opacity-40">Indonesia {!subtitleUrl ? "(tidak tersedia)" : ""}</button>
+            </div>}
+          </div>
 
           {/* Info Judul Melayang di Bawah Kiri */}
           {!isMenuOpen && (
