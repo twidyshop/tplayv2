@@ -51,35 +51,57 @@ export default function Home() {
   };
 
   const handlePlatformChange = (platform) => {
+    // Clear previous platform content immediately; never leave stale cards visible.
+    setLoading(true);
+    setDramas([]);
+    setHeroDrama(null);
+    setSelectedDramaForPlayer(null);
     setSelectedPlatform(platform);
     setActiveEndpoint(platform.endpoints[0].id);
   };
 
   useEffect(() => {
+    const controller = new AbortController();
+    let isCurrent = true;
+
     async function fetchContent() {
       setLoading(true);
+      setDramas([]);
+      setHeroDrama(null);
       try {
-        const res = await fetch(`/api/hoshiyomi/${selectedPlatform.id}/${activeEndpoint}`);
+        const res = await fetch(
+          `/api/hoshiyomi/${selectedPlatform.id}/${activeEndpoint}`,
+          { signal: controller.signal, cache: "no-store" }
+        );
+        if (!res.ok) throw new Error(`Hoshiyomi HTTP ${res.status}`);
         const data = await res.json();
-        
+
         let list = [];
         if (Array.isArray(data)) list = data;
         else if (Array.isArray(data.data)) list = data.data;
         else if (Array.isArray(data.items)) list = data.items;
         else if (Array.isArray(data.results)) list = data.results;
 
+        if (!isCurrent) return;
         setDramas(list);
-        if (list.length > 0) setHeroDrama(list[0]);
-        else setHeroDrama(null);
+        setHeroDrama(list[0] || null);
       } catch (err) {
-        console.error("Failed fetching contents:", err);
+        if (err.name !== "AbortError" && isCurrent) {
+          console.error("Failed fetching contents:", err);
+          setDramas([]);
+          setHeroDrama(null);
+        }
       } finally {
-        setLoading(false);
+        if (isCurrent) setLoading(false);
       }
     }
 
     fetchContent();
-  }, [selectedPlatform, activeEndpoint]);
+    return () => {
+      isCurrent = false;
+      controller.abort();
+    };
+  }, [selectedPlatform.id, activeEndpoint]);
 
   return (
     <main className="min-h-screen bg-[#0b0c10] text-slate-100 max-w-lg mx-auto relative pt-[56px] pb-20 shadow-2xl">
