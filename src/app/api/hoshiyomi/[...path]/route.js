@@ -66,11 +66,11 @@ export async function GET(request, { params }) {
       const upstream = await fetch(mediaUrl.toString(), { headers, redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(25000) });
       const type = upstream.headers.get("content-type") || "";
       const finalUrl = upstream.url || mediaUrl.toString();
-      const isManifest = type.includes("mpegurl") || /\\.m3u8(?:[?#]|$)/i.test(finalUrl) || /\\.m3u8(?:[?#]|$)/i.test(mediaUrl.toString());
+      const isManifest = type.includes("mpegurl") || /\.m3u8(?:[?#]|$)/i.test(finalUrl) || /\.m3u8(?:[?#]|$)/i.test(mediaUrl.toString());
       const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges,Content-Type", "Cache-Control": "no-store" };
       if (isManifest) {
         const body = await upstream.text();
-        const rewritten = upstream.ok ? body.split(/\\r?\\n/).map(line => {
+        const rewritten = upstream.ok ? body.split(/\r?\n/).map(line => {
           const trimmed = line.trim();
           if (!trimmed) return line;
           const rewrite = raw => {
@@ -79,7 +79,7 @@ export async function GET(request, { params }) {
           };
           if (trimmed.startsWith("#")) return line.replace(/URI="([^"]+)"/g, (_, raw) => 'URI="' + rewrite(raw) + '"');
           return rewrite(trimmed);
-        }).join("\\n") : body;
+        }).join("\n") : body;
         return new NextResponse(rewritten, { status: upstream.status, headers: { ...cors, "Content-Type": type || "application/vnd.apple.mpegurl" } });
       }
       const out = new Headers(cors);
