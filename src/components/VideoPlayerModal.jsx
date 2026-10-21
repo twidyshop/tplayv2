@@ -16,6 +16,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   const videoRef = useRef(null);
   const hlsInstanceRef = useRef(null);
+  const requestSeqRef = useRef(0);
 
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
@@ -85,43 +86,59 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   // INIT: Load Metadata & Episodes
   useEffect(() => {
+    const controller = new AbortController();
     let isMounted = true;
+    // Reset every piece of player state when the selected drama/source changes.
+    requestSeqRef.current += 1;
+    setLoading(true);
+    setDetail(null);
+    setEpisodes([]);
+    setCurrentEpisode(null);
+    setStreamUrl("");
+    setSubtitleUrl("");
+
     async function initData() {
-      setLoading(true);
       try {
         let epsList = [];
         let detailData = null;
+        const base = `/api/hoshiyomi/${platform}`;
+        const params = new URLSearchParams();
+        if (primaryId) params.set("id", primaryId);
+        if (vid) params.set("vid", vid);
 
-        // Tembak detail untuk jaga-jaga kalau episode/subtitle ada di dalam metadata
-        const resDetail = await fetch(`/api/hoshiyomi/${platform}/detail?id=${primaryId}&vid=${vid}`);
+        const resDetail = await fetch(`${base}/detail?${params}`, { signal: controller.signal, cache: "no-store" });
         if (resDetail.ok) {
           detailData = await resDetail.json();
           epsList = extractEpisodes(detailData);
         }
 
-        // Jika kosong, tembak endpoint episodes
         if (epsList.length === 0) {
-          const resEps = await fetch(`/api/hoshiyomi/${platform}/episodes?id=${primaryId}&vid=${vid}`);
+          const resEps = await fetch(`${base}/episodes?${params}`, { signal: controller.signal, cache: "no-store" });
           if (resEps.ok) epsList = extractEpisodes(await resEps.json());
         }
 
-        if (isMounted) {
-          setDetail(detailData);
-          setEpisodes(epsList);
-          if (epsList.length > 0) handleSelectEpisode(epsList[0], 0, detailData);
-        }
+        if (!isMounted) return;
+        setDetail(detailData);
+        setEpisodes(epsList);
+        if (epsList.length > 0) handleSelectEpisode(epsList[0], 0, detailData);
       } catch (err) {
-        console.error("Init Error:", err);
+        if (err.name !== "AbortError") console.error("Init Error:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
     if (primaryId) initData();
-    return () => { isMounted = false; };
+    else setLoading(false);
+    return () => {
+      isMounted = false;
+      controller.abort();
+      requestSeqRef.current += 1;
+    };
   }, [primaryId, platform, vid]);
 
   // ON-DEMAND PLAY: Tembak video per episode
   const handleSelectEpisode = async (ep, idx, fallbackDetail = detail) => {
+    const requestSeq = ++requestSeqRef.current;
     setCurrentEpisode(ep);
     setIsMenuOpen(false);
     setStreamLoading(true);
@@ -158,6 +175,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       }
     }
 
+    // Ignore late responses from a previous episode selection.
+    if (requestSeq !== requestSeqRef.current) return;
     setStreamUrl(bestUrl);
     // Proxy Subtitle agar CC Muncul & Tidak kena CORS
     setSubtitleUrl(bestSub ? `/api/hoshiyomi/proxy-sub?url=${encodeURIComponent(bestSub)}` : "");
@@ -166,8 +185,9 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
 
   // HLS Player Binding
   useEffect(() => {
-    if (!streamUrl || !videoRef.current) return;
     const videoEl = videoRef.current;
+    if (!streamUrl || !videoEl) return;
+    let cancelled = false;
 
     if (hlsInstanceRef.current) {
       hlsInstanceRef.current.destroy();
@@ -181,6 +201,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         const script = document.createElement("script");
         script.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
         script.onload = () => {
+          if (cancelled) return;
           if (window.Hls && window.Hls.isSupported()) {
             const hls = new window.Hls({ enableWorker: true, lowLatencyMode: true });
             hls.loadSource(streamUrl);
@@ -195,6 +216,16 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     } else {
       videoEl.src = streamUrl;
     }
+    return () => {
+      cancelled = true;
+      if (hlsInstanceRef.current) {
+        hlsInstanceRef.current.destroy();
+        hlsInstanceRef.current = null;
+      }
+      videoEl.pause();
+      videoEl.removeAttribute("src");
+      videoEl.load();
+    };
   }, [streamUrl]);
 
   const renderEpisodeGrid = () => (
@@ -216,7 +247,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   );
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black flex flex-col max-w-lg mx-auto overflow-hidden">
+    <div className="fixed inset-x-0 top-[56px] bottom-0 z-[40] bg-black flex flex-col max-w-lg mx-auto overflow-hidden">
       {/* Tombol Close Transparan */}
       <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-50 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
         <span className="text-xs font-black text-purple-400 uppercase tracking-widest drop-shadow-md pointer-events-auto">
