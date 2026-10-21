@@ -45,10 +45,10 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     findUrls(obj);
 
     if (urls.length === 0) return "";
-    const mediaUrls = urls.filter(u => /\\.(m3u8|mp4)(?:[?#]|$)/i.test(u));
-    const m3u8s = mediaUrls.filter(u => /\\.m3u8(?:[?#]|$)/i.test(u));
+    const mediaUrls = urls.filter(u => /\.(m3u8|mp4)(?:[?#]|$)/i.test(u));
+    const m3u8s = mediaUrls.filter(u => /\.m3u8(?:[?#]|$)/i.test(u));
     if (m3u8s.length > 0) return m3u8s[0];
-    const mp4s = mediaUrls.filter(u => /\\.mp4(?:[?#]|$)/i.test(u));
+    const mp4s = mediaUrls.filter(u => /\.mp4(?:[?#]|$)/i.test(u));
     if (mp4s.length > 0) return mp4s[0];
     return "";
   };
