@@ -105,6 +105,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         const params = new URLSearchParams();
         if (primaryId) params.set("id", primaryId);
         if (vid) params.set("vid", vid);
+        params.set("lang", "id");
 
         const resDetail = await fetch(`${base}/detail?${params}`, { signal: controller.signal, cache: "no-store" });
         if (resDetail.ok) {
@@ -113,8 +114,15 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         }
 
         if (epsList.length === 0) {
-          const resEps = await fetch(`${base}/episodes?${params}`, { signal: controller.signal, cache: "no-store" });
-          if (resEps.ok) epsList = extractEpisodes(await resEps.json());
+          // Hoshiyomi's main API calls this endpoint "allepisode"; keep
+          // the "episodes" alias as a compatibility fallback for providers.
+          for (const endpoint of ["allepisode", "episodes"]) {
+            const resEps = await fetch(`${base}/${endpoint}?${params}`, { signal: controller.signal, cache: "no-store" });
+            if (resEps.ok) {
+              epsList = extractEpisodes(await resEps.json());
+              if (epsList.length) break;
+            }
+          }
         }
 
         if (!isMounted) return;
