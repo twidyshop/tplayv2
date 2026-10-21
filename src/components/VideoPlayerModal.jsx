@@ -187,8 +187,31 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
       }
     }
 
-    // Normalized V2 episodes include their actual media URL. Try this when
-    // legacy /play does not return a playable MP4/HLS URL.
+    // The main Hoshiyomi API documents /allepisode as the endpoint that
+    // returns episode video data. Try it before experimental V2 or /play.
+    if (!bestUrl) {
+      try {
+        const allUrl = "/api/hoshiyomi/" + encodeURIComponent(platform) + "/allepisode?id=" + encodeURIComponent(primaryId) + "&lang=id";
+        const allRes = await fetch(allUrl, { cache: "no-store" });
+        if (allRes.ok) {
+          const allData = await allRes.json();
+          const allEpisodes = extractEpisodes(allData);
+          const wantedNum = Number(ep.episode || ep.episode_number || ep.index || ep.order || idx + 1);
+          const matched = allEpisodes.find((item, i) =>
+            Number(item.episode || item.episode_number || item.episode_no || item.index || item.order || i + 1) === wantedNum
+          ) || allEpisodes[idx];
+          if (matched) {
+            bestUrl = extractBestVideo(matched);
+            const foundSub = extractSubtitle(matched);
+            if (foundSub) bestSub = foundSub;
+          }
+        }
+      } catch (e) {
+        console.error("Main API allepisode fallback error:", e);
+      }
+    }
+
+    // Normalized V2 API requires Pro tier; use only as a final optional fallback.
     if (!bestUrl) {
       try {
         const v2Url = "/api/hoshiyomi/v2/dramas/" + encodeURIComponent(platform) + "/" + encodeURIComponent(primaryId) + "/episodes?lang=id";
