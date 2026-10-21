@@ -40,8 +40,9 @@ export async function GET(request, { params }) {
     }
   }
 
-  // PROXY API HOSHIYOMI
-  const apiPath = pathArray.join("/");
+  // Proxy API Hoshiyomi; /v2 routes to the normalized playback API.
+  const useV2 = pathArray[0] === "v2";
+  const apiPath = (useV2 ? pathArray.slice(1) : pathArray).join("/");
   
   // Keep the paid API key server-side in Vercel Environment Variables.
   const apiKey = process.env.HOSHIYOMI_API_KEY;
@@ -55,7 +56,8 @@ export async function GET(request, { params }) {
   // Never forward a caller-supplied key to the upstream provider.
   searchParams.delete("apikey");
   searchParams.delete("api_key");
-  const targetUrl = `https://api.hoshiyomi.my.id/api/${apiPath}?${searchParams.toString()}`;
+  const apiHost = useV2 ? "https://apiv2.hoshiyomi.my.id" : "https://api.hoshiyomi.my.id";
+  const targetUrl = `${apiHost}/api/${apiPath}?${searchParams.toString()}`;
 
   try {
     const res = await fetch(targetUrl, {
