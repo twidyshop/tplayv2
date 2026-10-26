@@ -105,9 +105,15 @@ export async function GET(request, { params }) {
     }
   }
 
-  // Proxy API Hoshiyomi; /v2 routes to the normalized playback API.
+  // Normalize aliases to the documented Hoshiyomi endpoints used by Tplaysansekai.
   const useV2 = pathArray[0] === "v2";
-  const apiPath = (useV2 ? pathArray.slice(1) : pathArray).join("/");
+  const apiParts = (useV2 ? pathArray.slice(1) : [...pathArray]);
+  const sourcePlatform = apiParts[0] || "";
+  const requestedAction = apiParts[1] || "";
+  // Hoshiyomi uses /allepisode for episode lists; /episodes is not a valid
+  // upstream endpoint for these platforms and returns 400.
+  if (requestedAction === "episodes") apiParts[1] = "allepisode";
+  const apiPath = apiParts.join("/");
   
   // Keep the paid API key server-side in Vercel Environment Variables.
   const apiKey = process.env.HOSHIYOMI_API_KEY;
@@ -121,8 +127,15 @@ export async function GET(request, { params }) {
   // Never forward a caller-supplied key to the upstream provider.
   searchParams.delete("apikey");
   searchParams.delete("api_key");
+  // Match the known-good iQIYI detail parameters from Tplaysansekai.
+  if (sourcePlatform === "iqiyi" && requestedAction === "detail") {
+    searchParams.set("lang", "idid");
+    searchParams.set("language", "id_id");
+    searchParams.set("region", "id");
+  }
   const apiHost = useV2 ? "https://apiv2.hoshiyomi.my.id" : "https://api.hoshiyomi.my.id";
-  const targetUrl = `${apiHost}/api/${apiPath}?${searchParams.toString()}`;
+  const query = searchParams.toString();
+  const targetUrl = `${apiHost}/api/${apiPath}${query ? "?" + query : ""}`;
 
   try {
     const res = await fetch(targetUrl, {
@@ -133,6 +146,10 @@ export async function GET(request, { params }) {
     });
 
     const body = await res.text();
+    // Log upstream failure details in Vercel, without exposing the API key.
+    if (!res.ok) {
+      console.error("[Hoshiyomi proxy]", apiPath, res.status, body.slice(0, 500));
+    }
     return new NextResponse(body, {
       status: res.status,
       headers: {
