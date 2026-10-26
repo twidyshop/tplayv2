@@ -55,7 +55,9 @@ export async function GET(request, { params }) {
     }
     const sourcePlatform = pathArray[0] || "";
     const referer = sourcePlatform === "wetv" ? "https://wetv.vip/" :
-      sourcePlatform === "iqiyi" ? "https://www.iq.com/" : "https://www.google.com/";
+      sourcePlatform === "iqiyi" ? "https://www.iq.com/" :
+      sourcePlatform.startsWith("dramabox") ? "https://www.dramabox.com/" :
+      mediaUrl.origin + "/";
     const origin = sourcePlatform === "wetv" ? "https://wetv.vip" :
       sourcePlatform === "iqiyi" ? "https://www.iq.com" : "";
     try {
@@ -66,10 +68,20 @@ export async function GET(request, { params }) {
       const upstream = await fetch(mediaUrl.toString(), { headers, redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(25000) });
       const type = upstream.headers.get("content-type") || "";
       const finalUrl = upstream.url || mediaUrl.toString();
-      const isManifest = type.includes("mpegurl") || /\.m3u8(?:[?#]|$)/i.test(finalUrl) || /\.m3u8(?:[?#]|$)/i.test(mediaUrl.toString());
-      const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges,Content-Type", "Cache-Control": "no-store" };
+      const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,HEAD,OPTIONS", "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges,Content-Type", "Cache-Control": "no-store" };
+      let manifestBody = null;
+      let isManifest = /mpegurl|vnd\.apple\.mpegurl/i.test(type) || /\.m3u8(?:[?#]|$)/i.test(finalUrl) || /\.m3u8(?:[?#]|$)/i.test(mediaUrl.toString());
+      if (!isManifest && upstream.ok) {
+        try {
+          const probe = await upstream.clone().text();
+          if (/^\s*#EXTM3U/i.test(probe) || /#EXT-X-(?:VERSION|STREAM-INF|TARGETDURATION|MEDIA-SEQUENCE)/i.test(probe)) {
+            isManifest = true;
+            manifestBody = probe;
+          }
+        } catch {}
+      }
       if (isManifest) {
-        const body = await upstream.text();
+        const body = manifestBody ?? await upstream.text();
         const rewritten = upstream.ok ? body.split(/\r?\n/).map(line => {
           const trimmed = line.trim();
           if (!trimmed) return line;
@@ -83,9 +95,10 @@ export async function GET(request, { params }) {
         return new NextResponse(rewritten, { status: upstream.status, headers: { ...cors, "Content-Type": type || "application/vnd.apple.mpegurl" } });
       }
       const out = new Headers(cors);
-      for (const key of ["content-type", "content-range", "accept-ranges", "etag", "last-modified"]) {
+      for (const key of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
         const value = upstream.headers.get(key); if (value) out.set(key, value);
       }
+      if (upstream.status === 206 && !out.has("content-range")) out.delete("content-length");
       return new NextResponse(upstream.body, { status: upstream.status, headers: out });
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Gagal mengambil resource video." }, { status: 502 });
