@@ -342,7 +342,37 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
           }
         };
         script.onerror = () => {
-          if (!cancelled) {
+          if (cancelled) return;
+          // CDN fallback matters on networks that block jsDelivr.
+          if (!script.dataset.fallbackTried) {
+            script.dataset.fallbackTried = "1";
+            const fallback = document.createElement("script");
+            fallback.src = "https://unpkg.com/hls.js@1.6.13/dist/hls.min.js";
+            fallback.onload = () => {
+              if (cancelled) return;
+              if (window.Hls && window.Hls.isSupported()) {
+                const hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+                hls.on(window.Hls.Events.ERROR, (_event, data) => {
+                  if (!data?.fatal || cancelled) return;
+                  if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+                  else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+                });
+                hls.loadSource(streamUrl);
+                hls.attachMedia(videoEl);
+                hlsInstanceRef.current = hls;
+              } else {
+                videoEl.src = streamUrl;
+                videoEl.load();
+              }
+            };
+            fallback.onerror = () => {
+              if (!cancelled) {
+                videoEl.src = streamUrl;
+                videoEl.load();
+              }
+            };
+            document.body.appendChild(fallback);
+          } else {
             videoEl.src = streamUrl;
             videoEl.load();
           }
