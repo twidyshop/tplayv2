@@ -23,7 +23,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
   const isLandscape = platform === "iqiyi" || platform === "wetv";
 
   // Ambil semua kemungkinan ID agar endpoint play tidak 400 Bad Request
-  const primaryId = drama?.id || drama?.book_id || drama?.cid || drama?.album_id || "";
+  const primaryId = drama?.id || drama?.bookId || drama?.book_id || drama?.cid || drama?.albumId || drama?.album_id || drama?.collectionId || drama?.playletId || drama?.shortPlayId || "";
   const vid = drama?.vid || "";
 
   // 1. Ekstraktor Video: Selalu cari kualitas tertinggi (1080p / array terakhir)
@@ -275,8 +275,13 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     if (requestSeq !== requestSeqRef.current) return;
     // Use the server proxy for WeTV/iQIYI, following Tplaysansekai's
     // manifest and segment rewriting approach to avoid browser CORS failures.
-    const playableUrl = bestUrl && /^https?:\/\//i.test(bestUrl) && (platform === "wetv" || platform === "iqiyi")
-      ? `/api/hoshiyomi/${platform}/proxy?url=${encodeURIComponent(bestUrl)}`
+    const isHls = Boolean(bestUrl && (/\.m3u8(?:[?#]|$)/i.test(bestUrl) || /[?&](?:format|type)=(?:m3u8|hls)/i.test(bestUrl)));
+    // Relay every HLS source so child playlists, keys, and segments are rewritten too.
+    // WeTV/iQIYI MP4 can also require provider Referer headers.
+    const needsRelay = bestUrl && /^https?:\/\//i.test(bestUrl) &&
+      (isHls || platform === "wetv" || platform === "iqiyi");
+    const playableUrl = needsRelay
+      ? `/api/hoshiyomi/${encodeURIComponent(platform)}/proxy?url=${encodeURIComponent(bestUrl)}`
       : bestUrl;
     setStreamUrl(playableUrl);
     // Proxy Subtitle agar CC Muncul & Tidak kena CORS
@@ -311,16 +316,35 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         videoEl.src = streamUrl;
       } else {
         const script = document.createElement("script");
-        script.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
+        script.src = "https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js";
         script.onload = () => {
           if (cancelled) return;
           if (window.Hls && window.Hls.isSupported()) {
-            const hls = new window.Hls({ enableWorker: true, lowLatencyMode: true });
+            const hls = new window.Hls({
+              enableWorker: true,
+              lowLatencyMode: false,
+              backBufferLength: 30,
+              manifestLoadingTimeOut: 20000,
+              levelLoadingTimeOut: 20000,
+              fragLoadingTimeOut: 30000,
+              maxBufferLength: 30,
+            });
+            hls.on(window.Hls.Events.ERROR, (_event, data) => {
+              if (!data?.fatal || cancelled) return;
+              if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+              else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+            });
             hls.loadSource(streamUrl);
             hls.attachMedia(videoEl);
             hlsInstanceRef.current = hls;
           } else {
             videoEl.src = streamUrl;
+          }
+        };
+        script.onerror = () => {
+          if (!cancelled) {
+            videoEl.src = streamUrl;
+            videoEl.load();
           }
         };
         document.body.appendChild(script);
