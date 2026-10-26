@@ -278,8 +278,7 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
     const isHls = Boolean(bestUrl && (/\.m3u8(?:[?#]|$)/i.test(bestUrl) || /[?&](?:format|type)=(?:m3u8|hls)/i.test(bestUrl)));
     // Relay every HLS source so child playlists, keys, and segments are rewritten too.
     // WeTV/iQIYI MP4 can also require provider Referer headers.
-    const needsRelay = bestUrl && /^https?:\/\//i.test(bestUrl) &&
-      (isHls || platform === "wetv" || platform === "iqiyi");
+    const needsRelay = bestUrl && /^https?:\/\//i.test(bestUrl);
     const playableUrl = needsRelay
       ? `/api/hoshiyomi/${encodeURIComponent(platform)}/proxy?url=${encodeURIComponent(bestUrl)}`
       : bestUrl;
