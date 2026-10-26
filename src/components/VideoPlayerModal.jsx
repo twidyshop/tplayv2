@@ -132,6 +132,8 @@ export default function VideoPlayerModal({ drama, platform, onClose, onSaveHisto
         const base = `/api/hoshiyomi/${apiPlatform}`;
         const params = new URLSearchParams();
         if (primaryId) params.set("id", primaryId);
+        const albumId = drama?.albumId || drama?.album_id || drama?.albumID || "";
+        if (albumId) params.set("albumId", String(albumId));
         if (vid) params.set("vid", vid);
         params.set("lang", "id");
 
